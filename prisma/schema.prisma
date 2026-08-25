@@ -1,0 +1,261 @@
+// ShipLedger — Prisma schema
+// Forensic delivery-to-billing reconciliation tool for dev/IT services firms.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tenancy & core organizational entities
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Client {
+  id           String     @id @default(cuid())
+  name         String
+  industry     String?
+  sizeBand     String?    // e.g. "10-50"
+  contactName  String?
+  contactEmail String?
+  logoUrl      String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  contracts    Contract[]
+  projects     Project[]
+  invoices     Invoice[]
+}
+
+model Contract {
+  id              String   @id @default(cuid())
+  clientId        String
+  title           String
+  effectiveDate    DateTime
+  endDate         DateTime?
+  currency        String   @default("INR")
+  totalValue      Float?
+  rawText         String?  // original SOW text
+  status          String   @default("active") // draft|active|expired|terminated
+  extractedJson   String?  // LLM-extracted structured payload (JSON string)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  client          Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lineItems       LineItem[]
+  changeOrders    ChangeOrder[]
+  projects        Project[]
+  findings        Finding[]
+  invoices        Invoice[]
+}
+
+model ChangeOrder {
+  id           String   @id @default(cuid())
+  contractId   String
+  title        String
+  description  String
+  value        Float?
+  signedDate   DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contract     Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+}
+
+model LineItem {
+  id           String  @id @default(cuid())
+  contractId   String
+  description  String
+  rate         Float?
+  rateUnit     String? // hour|day|story-point|fixed|month
+  quantity     Float?
+  milestone    String?
+  deliveryDate DateTime?
+  createdAt    DateTime @default(now())
+
+  contract     Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delivery-side records (planned + executed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Project {
+  id          String   @id @default(cuid())
+  clientId    String
+  contractId  String?
+  name        String
+  status      String   @default("active") // active|completed|on_hold
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contract    Contract?    @relation(fields: [contractId], references: [id])
+  tickets     Ticket[]
+  codeActivities CodeActivity[]
+  findings    Finding[]
+  monitored   MonitoredProject?
+}
+
+model Ticket {
+  id          String   @id @default(cuid())
+  projectId   String
+  externalId  String   // e.g. ENG-204
+  title       String
+  type        String? // story|bug|task|epic
+  status      String  // todo|in_progress|done|closed
+  assignee    String?
+  created     DateTime
+  updated     DateTime
+  description String?
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model CodeActivity {
+  id          String   @id @default(cuid())
+  projectId   String
+  type        String   // commit|pr|merge|deploy
+  ref         String   // commit sha or PR number
+  title       String
+  author      String
+  timestamp   DateTime
+  additions   Int?
+  deletions   Int?
+  filesChanged Int?
+  url         String?
+  createdAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Billing-side records
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Invoice {
+  id           String   @id @default(cuid())
+  clientId     String
+  contractId   String?
+  number       String
+  issueDate    DateTime
+  dueDate      DateTime?
+  status       String   @default("issued") // draft|issued|paid|overdue|void
+  total        Float
+  currency     String   @default("INR")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contract     Contract?    @relation(fields: [contractId], references: [id])
+  lines        InvoiceLine[]
+}
+
+model InvoiceLine {
+  id           String   @id @default(cuid())
+  invoiceId    String
+  description  String
+  amount       Float
+  periodStart  DateTime?
+  periodEnd    DateTime?
+  createdAt    DateTime @default(now())
+
+  invoice      Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Findings — the core artifact
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Finding {
+  id              String   @id @default(cuid())
+  contractId      String?
+  projectId       String?
+  type            String   // missed_milestone|unbilled_overage|scope_expansion|rate_discrepancy|unauthorized_work
+  title           String
+  summary         String
+  impactAmount     Float?   // INR value at stake
+  confidence      String   // HIGH|MEDIUM|LOW
+  confidenceScore Float?   // 0.0-1.0 composite
+  assessment      String   // billable|already_covered|ambiguous
+  recommendedAction String // approve|dismiss|request_review|draft_change_order
+  status          String   @default("pending_review") // pending_review|approved|dismissed|escalated
+  contractClause  String?
+  billingState    String?
+  reviewNotes     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  reviewedAt      DateTime?
+  reviewedBy      String?
+
+  contract        Contract?  @relation(fields: [contractId], references: [id])
+  project         Project?   @relation(fields: [projectId], references: [id])
+  evidence        FindingEvidence[]
+
+  @@index([status])
+  @@index([type])
+}
+
+model FindingEvidence {
+  id           String   @id @default(cuid())
+  findingId    String
+  evidenceType String   // contract_clause|delivery_record|billing_record|supporting|contradicting
+  source       String   // sow|jira|github|gitlab|invoice|change_order
+  refId        String?  // id of the linked record in source system
+  title        String
+  detail       String?
+  timestamp    DateTime?
+  weight       Float?   // contribution to confidence score
+  createdAt    DateTime @default(now())
+
+  finding      Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Continuous monitoring (Phase 3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model MonitoredProject {
+  id          String   @id @default(cuid())
+  projectId   String   @unique
+  startedAt   DateTime @default(now())
+  alertsEnabled Boolean @default(true)
+  driftBaseline Float?  // expected delivery-to-billing ratio
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  alerts      Alert[]
+}
+
+model Alert {
+  id          String   @id @default(cuid())
+  monitoredProjectId String
+  severity    String   // info|warning|critical
+  category    String   // scope_creep|milestone_gap|billing_drift|rate_risk
+  message     String
+  createdAt   DateTime @default(now())
+  acknowledged Boolean @default(false)
+
+  monitoredProject MonitoredProject @relation(fields: [monitoredProjectId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Immutable audit log — every access, review, export, finding action
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actor       String
+  action      String   // view|review|approve|dismiss|escalate|export|extract|seed
+  entityType  String?
+  entityId    String?
+  detail      String?
+  createdAt   DateTime @default(now())
+
+  @@index([actor])
+  @@index([action])
+}
