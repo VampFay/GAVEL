@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { ok } from '@/lib/api'
 import { PaginationSchema } from '@/lib/schemas'
+import { money } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,7 +71,11 @@ export async function GET(req: NextRequest) {
   })
 
   const hasMore = items.length > limit
-  const data = hasMore ? items.slice(0, limit) : items
+  const data = (hasMore ? items.slice(0, limit) : items).map(f => ({
+    ...f,
+    // Decimal → number at the response boundary (see src/lib/money.ts).
+    impactAmount: money(f.impactAmount),
+  }))
   const nextCursor = hasMore && data.length > 0 ? data[data.length - 1]?.id : null
 
   return ok({ findings: data, nextCursor, hasMore })

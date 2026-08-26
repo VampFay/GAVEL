@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { ok, invalidRequest, withErrorHandler } from '@/lib/api'
 import { CreateClientSchema } from '@/lib/schemas'
-import { getCurrentActor, getRequestId } from '@/lib/actor'
+import { getRequestId } from '@/lib/actor'
+import { requireRole } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,6 +18,11 @@ export async function GET() {
 }
 
 export const POST = withErrorHandler(async (req: NextRequest) => {
+  // Authorization: admin only — client onboarding is a privileged action
+  // (creates the org tree that every downstream contract/finding depends on).
+  const actor = await requireRole(['admin'])
+  const requestId = await getRequestId()
+
   const text = await req.text()
   let body: unknown
   try {
@@ -27,9 +33,6 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const parsed = CreateClientSchema.safeParse(body)
   if (!parsed.success) return invalidRequest(parsed.error)
   const data = parsed.data
-
-  const actor = await getCurrentActor()
-  const requestId = await getRequestId()
 
   // Wrap client create + audit-log entry in a transaction. The previous
   // implementation wrote the client row but never logged the action.
@@ -45,7 +48,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     })
     await tx.auditLog.create({
       data: {
-        actor,
+        actorId: actor.id,
+        actor: actor.email,
         action: 'create_client',
         entityType: 'client',
         entityId: c.id,

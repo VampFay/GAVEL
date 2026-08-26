@@ -2,6 +2,7 @@
 // Populates realistic demo data representing one audit client + findings.
 
 import { db } from '../src/lib/db'
+import { hashPassword } from '../src/lib/auth'
 
 async function main() {
   console.log('Seeding ShipLedger demo data...')
@@ -30,6 +31,39 @@ async function main() {
   await db.client.deleteMany()
   await db.user.deleteMany()
   await db.tenant.deleteMany()
+
+  // ─────────────────────────── USERS ────────────────────────────
+  // Demo users with role-differentiated accounts so you can exercise the
+  // auth flow end-to-end in the sandbox. Passwords are hashed with scrypt
+  // (see src/lib/auth.ts). DO NOT use these credentials in production —
+  // the seeded demo users are deleted on every re-seed.
+  const adminHash = await hashPassword('shipledger-admin-demo')
+  const reviewerHash = await hashPassword('shipledger-reviewer-demo')
+  const viewerHash = await hashPassword('shipledger-viewer-demo')
+  await db.user.create({
+    data: {
+      email: 'admin@shipledger.demo',
+      name: 'Demo Admin',
+      role: 'admin',
+      passwordHash: adminHash,
+    },
+  })
+  await db.user.create({
+    data: {
+      email: 'reviewer@shipledger.demo',
+      name: 'Demo Reviewer',
+      role: 'reviewer',
+      passwordHash: reviewerHash,
+    },
+  })
+  await db.user.create({
+    data: {
+      email: 'viewer@shipledger.demo',
+      name: 'Demo Viewer',
+      role: 'viewer',
+      passwordHash: viewerHash,
+    },
+  })
 
   // ─────────────────────────── CLIENT ───────────────────────────
   const client = await db.client.create({

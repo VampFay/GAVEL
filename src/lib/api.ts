@@ -52,9 +52,9 @@ export function invalidRequest(err: ZodError | string) {
 
 /**
  * Wrap an async route handler so:
+ *   - AuthError → 401 or 403 (see src/lib/auth.ts)
  *   - Prisma P2025 (record not found) → 404
  *   - Zod errors → 400
- *   - Auth errors → 401/403
  *   - Everything else → 500 with a generic message + server-side console.error
  *     (does NOT leak `err.message` to the client)
  */
@@ -65,6 +65,14 @@ export function withErrorHandler<TArgs extends unknown[]>(
     try {
       return await fn(...args)
     } catch (err: unknown) {
+      // AuthError → 401 or 403 (mapped from err.status).
+      if (err instanceof Error && err.name === 'AuthError') {
+        const e = err as unknown as { status: number; message: string }
+        return NextResponse.json(
+          { ok: false, error: e.message },
+          { status: e.status }
+        )
+      }
       // P2025: record not found (Prisma)
       if (
         err !== null &&

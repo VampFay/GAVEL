@@ -15,6 +15,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   SHIPLEDGER_ADMIN_TOKEN: z.string().optional(),
   SHIPLEDGER_API_TOKEN: z.string().optional(),
+  SHIPLEDGER_JWT_SECRET: z.string().min(32, 'SHIPLEDGER_JWT_SECRET must be >=32 chars').optional(),
 
   // Public — exposed to the client bundle by Next.js via the NEXT_PUBLIC_ prefix.
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { money, sumMoney } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,54 +43,65 @@ export async function GET() {
   ])
 
   // Single reduce pass over findings.
-  let totalImpact = 0
-  let approvedImpact = 0
+  // Money sums accumulate in Decimal.js to avoid IEEE-754 drift, then
+  // convert to JS numbers at the end (see src/lib/money.ts). Each finding's
+  // impact is also converted via `money()` for storage in the per-type map.
+  const nonDismissed: number[] = []
+  const approvedImpacts: number[] = []
   let pendingReview = 0
-  const typeMap = new Map<string, { count: number; impact: number }>()
+  const typeMap = new Map<string, { count: number; impact: number[] }>()
   const confidenceBuckets = { HIGH: 0, MEDIUM: 0, LOW: 0 }
-  const approvedByMonthKey = new Map<string, number>()
+  const approvedByMonthKey = new Map<string, number[]>()
 
   for (const f of findings) {
     const dismissed = f.status === 'dismissed'
-    const impact = f.impactAmount ?? 0
+    const impact = money(f.impactAmount) ?? 0
 
-    if (!dismissed) totalImpact += impact
+    if (!dismissed) nonDismissed.push(impact)
     if (f.status === 'approved') {
-      approvedImpact += impact
+      approvedImpacts.push(impact)
       // Recovery is dated by when the finding was APPROVED (reviewedAt),
       // not when it was first detected (createdAt).
       const reviewed = f.reviewedAt ? new Date(f.reviewedAt) : null
       if (reviewed) {
         const key = `${reviewed.getFullYear()}-${reviewed.getMonth()}`
-        approvedByMonthKey.set(key, (approvedByMonthKey.get(key) ?? 0) + impact)
+        const bucket = approvedByMonthKey.get(key) ?? []
+        bucket.push(impact)
+        approvedByMonthKey.set(key, bucket)
       }
     }
     if (f.status === 'pending_review') pendingReview++
 
-    const cur = typeMap.get(f.type) ?? { count: 0, impact: 0 }
+    const cur = typeMap.get(f.type) ?? { count: 0, impact: [] as number[] }
     cur.count++
-    cur.impact += dismissed ? 0 : impact
+    if (!dismissed) cur.impact.push(impact)
     typeMap.set(f.type, cur)
 
     if (f.confidence === 'HIGH' || f.confidence === 'MEDIUM' || f.confidence === 'LOW') {
-      confidenceBuckets[f.confidence]++
+      const key: keyof typeof confidenceBuckets = f.confidence
+      confidenceBuckets[key]++
     }
   }
+
+  const totalImpact = sumMoney(nonDismissed)
+  const approvedImpact = sumMoney(approvedImpacts)
 
   const findingsByType = Array.from(typeMap.entries()).map(([type, v]) => ({
     type,
     count: v.count,
-    impact: v.impact,
+    impact: sumMoney(v.impact),
   }))
 
   // Build a 6-month "approved impact by month" series, oldest first.
+  // Each month's impact is summed in Decimal.js to avoid drift.
   const recoveryByMonth: { label: string; impact: number }[] = []
   const now = new Date()
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
     const key = `${d.getFullYear()}-${d.getMonth()}`
     const label = d.toLocaleString('en-US', { month: 'short' })
-    recoveryByMonth.push({ label, impact: approvedByMonthKey.get(key) ?? 0 })
+    const bucket = approvedByMonthKey.get(key) ?? []
+    recoveryByMonth.push({ label, impact: sumMoney(bucket) })
   }
 
   return NextResponse.json({

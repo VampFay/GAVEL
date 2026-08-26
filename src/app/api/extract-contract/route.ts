@@ -4,7 +4,9 @@ import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
 import { ok, fail, invalidRequest, withErrorHandler } from '@/lib/api'
 import { ExtractContractSchema } from '@/lib/schemas'
-import { getCurrentActor, getRequestId } from '@/lib/actor'
+import { getRequestId } from '@/lib/actor'
+import { requireRole } from '@/lib/auth'
+import { toDecimal } from '@/lib/money'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -75,7 +77,30 @@ Rules:
 - Do NOT wrap the JSON in markdown fences. Output raw JSON only.
 - Do NOT include any commentary, headings, or text outside the JSON object.`
 
+const RE_PROMPT_SUFFIX = `\n\nIMPORTANT — your previous output did not parse as valid JSON or did not match the schema. Please re-emit the entire JSON object, valid this time, with no prose or markdown fences.`
+
+const MAX_EXTRACTION_ATTEMPTS = 3
+
+/** Backoff helper: wait `n * 250ms + small jitter` between LLM retries. */
+function backoffMs(attempt: number): number {
+  const base = Math.min(attempt, 5) * 250
+  const jitter = Math.floor(Math.random() * 100)
+  return base + jitter
+}
+
+/** Sleep helper for `await sleep(ms)`. */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 export const POST = withErrorHandler(async (req: NextRequest) => {
+  // ── Authorization: admin only — contract ingestion writes structural
+  // data the rest of the audit will rely on. Tighter than findings PATCH
+  // (reviewer+) because bad contract data poisons every downstream
+  // finding for that client.
+  const actor = await requireRole(['admin'])
+  const requestId = await getRequestId()
+
   // Parse + validate body with Zod.
   const text = await req.text()
   let body: unknown
@@ -88,38 +113,74 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   if (!validatedBody.success) return invalidRequest(validatedBody.error)
   const { rawText, persist, clientId } = validatedBody.data
 
-  // Call the LLM.
   const zai = await ZAI.create()
-  const completion = await zai.chat.completions.create({
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: rawText },
-    ],
-    thinking: { type: 'disabled' },
-  })
-  const content = completion?.choices?.[0]?.message?.content ?? ''
 
-  // Strip code fences.
-  const cleaned = content
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```\s*$/i, '')
-    .trim()
+  // ── LLM extraction with real re-prompt-on-validation-failure (§9.2) ──
+  // Previous implementation: parse failure → regex-grab first {...} blob.
+  // That silently produced partially-wrong contract records. Now: parse
+  // failure → re-prompt the model with an explicit "your previous output
+  // didn't validate" instruction. Up to MAX_EXTRACTION_ATTEMPTS total
+  // calls. Only after exhausting the retry budget do we fail.
+  let extracted: ExtractedContract | null = null
+  let attempt = 0
+  let lastParseError: string | null = null
+  while (attempt < MAX_EXTRACTION_ATTEMPTS) {
+    attempt++
+    const userContent =
+      attempt === 1
+        ? rawText
+        : `${rawText}${RE_PROMPT_SUFFIX}${lastParseError ? `\n\nLast error: ${lastParseError}` : ''}`
 
-  let extracted: ExtractedContract
-  try {
-    extracted = JSON.parse(cleaned)
-  } catch {
-    // Fallback: regex-extract first {...} blob. (This is salvage, NOT a
-    // proper re-prompt — see §9.2 of the plan for the real fix.)
-    const m = cleaned.match(/\{[\s\S]*\}/)
-    if (!m) {
-      return fail('LLM returned non-JSON output', 502)
+    let content = ''
+    try {
+      const completion = await zai.chat.completions.create({
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userContent },
+        ],
+        thinking: { type: 'disabled' },
+      })
+      content = completion?.choices?.[0]?.message?.content ?? ''
+    } catch (err) {
+      // Transient LLM failure — backoff and retry. If the last attempt
+      // also fails, we surface to the caller with a 502.
+      if (attempt >= MAX_EXTRACTION_ATTEMPTS) {
+        return fail('LLM extraction failed (transient errors)', 502)
+      }
+      await sleep(backoffMs(attempt))
+      continue
     }
-    extracted = JSON.parse(m[0])
+
+    // Strip code fences if present.
+    const cleaned = content
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/```\s*$/i, '')
+      .trim()
+
+    try {
+      extracted = JSON.parse(cleaned) as ExtractedContract
+      lastParseError = null
+      break
+    } catch (err) {
+      lastParseError = err instanceof Error ? err.message : 'invalid JSON'
+      if (attempt >= MAX_EXTRACTION_ATTEMPTS) {
+        // Re-prompt budget exhausted — give up honestly. Do NOT fall back
+        // to the regex salvage of the first {...} blob (which would
+        // silently produce a partially-wrong contract record).
+        return fail('LLM returned non-JSON output after retry budget', 502)
+      }
+      // Loop continues — re-prompt will include the error message.
+    }
   }
 
-  // Deterministic validation.
+  if (!extracted) {
+    // Unreachable — the loop above either breaks with extracted set or
+    // returns. Defensive only.
+    return fail('LLM extraction failed', 502)
+  }
+
+  // ── Deterministic validation (unchanged) ───────────────────────────
   const validated: ExtractedContract = {
     title: typeof extracted.title === 'string' ? extracted.title : null,
     effectiveDate: safeDate(extracted.effectiveDate),
@@ -145,9 +206,6 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   let contractId: string | null = null
 
   if (persist && clientId) {
-    const actor = await getCurrentActor()
-    const requestId = await getRequestId()
-
     // Wrap the entire write in a transaction: contract create + line items
     // + milestones + exclusions + audit-log. All-or-nothing.
     const c = await db.$transaction(async tx => {
@@ -160,7 +218,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         // Idempotent — don't duplicate. Still log the retry.
         await tx.auditLog.create({
           data: {
-            actor,
+            actorId: actor.id,
+            actor: actor.email,
             action: 'extract',
             entityType: 'contract',
             entityId: existing.id,
@@ -178,7 +237,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           effectiveDate: validated.effectiveDate ? new Date(validated.effectiveDate) : new Date(),
           endDate: validated.endDate ? new Date(validated.endDate) : null,
           currency: validated.currency ?? 'INR',
-          totalValue: validated.totalValue,
+          totalValue: toDecimal(validated.totalValue),
           rawText,
           extractedJson: JSON.stringify(validated),
           status: 'active',
@@ -191,7 +250,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           data: validated.lineItems.map(li => ({
             contractId: newContract.id,
             description: li.description,
-            rate: typeof li.rate === 'number' ? li.rate : null,
+            rate: toDecimal(li.rate),
             rateUnit: li.rateUnit ?? null,
             quantity: typeof li.quantity === 'number' ? li.quantity : null,
             milestone: li.milestone ?? null,
@@ -210,7 +269,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
             externalId: m.id,
             description: m.description,
             dueDate: safeDate(m.dueDate) ? new Date(safeDate(m.dueDate)!) : null,
-            value: typeof m.value === 'number' ? m.value : null,
+            value: toDecimal(m.value),
             currency: typeof m.currency === 'string' && m.currency.length === 3 ? m.currency.toUpperCase() : 'INR',
           })),
         })
@@ -229,7 +288,8 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
       await tx.auditLog.create({
         data: {
-          actor,
+          actorId: actor.id,
+          actor: actor.email,
           action: 'extract',
           entityType: 'contract',
           entityId: newContract.id,

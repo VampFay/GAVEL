@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { db } from '@/lib/db'
+import { withErrorHandler } from '@/lib/api'
+import { requireRole } from '@/lib/auth'
+import { getRequestId } from '@/lib/actor'
 
 const execFileAsync = promisify(execFile)
 
@@ -12,31 +15,24 @@ export const dynamic = 'force-dynamic'
  * DANGEROUS endpoint — runs `bun run scripts/seed.ts` which calls deleteMany()
  * on every table before re-inserting demo data.
  *
- * Hard guards:
+ * Hard guards (preserved from the previous implementation):
  *   1. Returns 404 in production (NODE_ENV === 'production')
- *   2. Requires SHIPLEDGER_ADMIN_TOKEN env var; client must send `Authorization: Bearer <token>`
+ *   2. Admin-role required (was: SHIPLEDGER_ADMIN_TOKEN env var). The shared
+ *      bearer token is gone — see the auth rewrite in src/lib/auth.ts.
  *   3. Uses execFile (no shell) with explicit arg array — no injection surface
  *   4. Does NOT echo stdout/stderr to the client (info-disclosure)
- *   5. Writes its own audit-log entry at the route layer
+ *   5. Writes its own audit-log entry at the route layer, attributed to the
+ *      verified caller (was: hardcoded `'admin@seed'`).
  */
-export async function POST(req: Request) {
+export const POST = withErrorHandler(async (req: Request) => {
   // Guard 1: never available in production
   if (process.env.NODE_ENV === 'production') {
     return NextResponse.json({ ok: false, error: 'not found' }, { status: 404 })
   }
 
-  // Guard 2: bearer token check.
-  //   - In dev with no token configured: allow (so the sandbox works).
-  //   - In dev with token configured: require it.
-  //   - In prod: unreachable (Guard 1 already returned 404).
-  const expected = process.env.SHIPLEDGER_ADMIN_TOKEN
-  if (expected) {
-    const auth = req.headers.get('authorization') ?? ''
-    const supplied = auth.startsWith('Bearer ') ? auth.slice(7) : ''
-    if (!supplied || supplied !== expected) {
-      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
-    }
-  }
+  // Guard 2: admin role required (replaces the shared bearer token).
+  const actor = await requireRole(['admin'])
+  const requestId = await getRequestId()
 
   try {
     // Guard 3: execFile with arg array, no shell
@@ -46,14 +42,16 @@ export async function POST(req: Request) {
       { cwd: '/home/z/my-project', timeout: 60_000, maxBuffer: 1 * 1024 * 1024 }
     )
 
-    // Guard 5: audit-log entry from the route layer
+    // Guard 5: audit-log entry attributed to the verified caller
     await db.auditLog.create({
       data: {
-        actor: 'admin@seed',
+        actorId: actor.id,
+        actor: actor.email,
         action: 'seed',
         entityType: 'system',
         entityId: null,
         detail: 'Demo data re-seeded via POST /api/seed',
+        requestId: requestId ?? undefined,
       },
     })
 
@@ -68,4 +66,4 @@ export async function POST(req: Request) {
       { status: 500 }
     )
   }
-}
+})

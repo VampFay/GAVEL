@@ -5,29 +5,20 @@ import {
   PatchFindingSchema,
   type FindingActionT,
 } from '@/lib/schemas'
-import { getCurrentActor, getRequestId } from '@/lib/actor'
+import { getRequestId } from '@/lib/actor'
+import { requireRole } from '@/lib/auth'
+import { money } from '@/lib/money'
+import {
+  ALLOWED_TRANSITIONS,
+  ACTION_TO_STATUS,
+} from '@/lib/finding-state-machine'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Finding status state machine.
- * A finding in `pending_review` can transition to any terminal state.
- * Terminal states (`approved`/`dismissed`/`escalated`) cannot re-enter
- * `pending_review` or jump to another terminal — they require a separate
- * "revoke" operation (not yet implemented).
+ * Finding status state machine — see src/lib/finding-state-machine.ts
+ * (the route handler and the unit test both import from there).
  */
-const ALLOWED_TRANSITIONS: Record<string, Set<FindingActionT>> = {
-  pending_review: new Set<FindingActionT>(['approve', 'dismiss', 'escalate']),
-  approved: new Set<FindingActionT>([]),
-  dismissed: new Set<FindingActionT>([]),
-  escalated: new Set<FindingActionT>([]),
-}
-
-const ACTION_TO_STATUS: Record<FindingActionT, string> = {
-  approve: 'approved',
-  dismiss: 'dismissed',
-  escalate: 'escalated',
-}
 
 export const GET = withErrorHandler(
   async (
@@ -44,7 +35,8 @@ export const GET = withErrorHandler(
       },
     })
     if (!finding) return notFound('finding not found')
-    return ok({ finding })
+    // Decimal → number at the response boundary (see src/lib/money.ts).
+    return ok({ finding: { ...finding, impactAmount: money(finding.impactAmount) } })
   }
 )
 
@@ -54,6 +46,13 @@ export const PATCH = withErrorHandler(
     { params }: { params: Promise<{ id: string }> }
   ) => {
     const { id } = await params
+
+    // ── Authorization: reviewer+ to approve/dismiss/escalate ──────────
+    // Throwing AuthError here maps to 401 (unauthenticated) or 403
+    // (insufficient role) via withErrorHandler.
+    const actor = await requireRole(['reviewer', 'admin'])
+    const actorId = actor.id
+    const requestId = await getRequestId()
 
     // Parse + validate the body with Zod.
     const text = await req.text()
@@ -66,10 +65,6 @@ export const PATCH = withErrorHandler(
     const parsed = PatchFindingSchema.safeParse(body)
     if (!parsed.success) return invalidRequest(parsed.error)
     const { action, reviewNotes } = parsed.data
-
-    // Derive actor from request context (NOT the body — that was the bug).
-    const actor = await getCurrentActor()
-    const requestId = await getRequestId()
 
     // Existence check + state-machine validation in one query.
     const existing = await db.finding.findUnique({
@@ -97,12 +92,14 @@ export const PATCH = withErrorHandler(
         data: {
           status: newStatus,
           reviewedAt: new Date(),
+          reviewedById: actorId, // verified FK to User (was a free-text string)
           reviewNotes: reviewNotes ?? null,
         },
       })
       await tx.auditLog.create({
         data: {
-          actor,
+          actorId,
+          actor: actor.email,
           action,
           entityType: 'finding',
           entityId: id,
@@ -113,6 +110,6 @@ export const PATCH = withErrorHandler(
       return f
     })
 
-    return ok({ finding: updated })
+    return ok({ finding: { ...updated, impactAmount: money(updated.impactAmount) } })
   }
 )

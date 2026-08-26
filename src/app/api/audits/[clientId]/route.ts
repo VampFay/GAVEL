@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { money } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +39,10 @@ export async function GET(
     return NextResponse.json({ ok: false, error: 'no contract/project' }, { status: 404 })
   }
 
+  // Convert Decimal money fields → numbers at the response boundary.
+  // Prisma.Decimal would otherwise serialize as a string (the safest
+  // JSON transport for money) but the existing client code expects
+  // `number` — see src/lib/money.ts.
   return NextResponse.json({
     ok: true,
     client: {
@@ -56,12 +61,28 @@ export async function GET(
       extractedJson: contract.extractedJson,
       effectiveDate: contract.effectiveDate,
       endDate: contract.endDate,
-      totalValue: contract.totalValue,
+      totalValue: money(contract.totalValue),
       currency: contract.currency,
-      lineItems: contract.lineItems,
-      changeOrders: contract.changeOrders,
-      invoices: contract.invoices,
-      findings: contract.findings,
+      lineItems: contract.lineItems.map(li => ({
+        ...li,
+        rate: money(li.rate),
+      })),
+      changeOrders: contract.changeOrders.map(co => ({
+        ...co,
+        value: money(co.value),
+      })),
+      invoices: contract.invoices.map(inv => ({
+        ...inv,
+        total: money(inv.total),
+        lines: inv.lines.map(line => ({
+          ...line,
+          amount: money(line.amount),
+        })),
+      })),
+      findings: contract.findings.map(f => ({
+        ...f,
+        impactAmount: money(f.impactAmount),
+      })),
     },
     project: {
       id: project.id,

@@ -4,6 +4,12 @@
 // NOTE: provider is sqlite for the dev sandbox. Production should switch to
 // postgresql + pgvector per §8 of the product plan. The Decimal type below
 // works on SQLite (stored as TEXT) and on Postgres (stored as NUMERIC).
+//
+// Money fields (totalValue, rate, amount, impactAmount, value, total) are
+// Decimal(14, 2) — never Float. IEEE-754 floats are the wrong type for
+// currency: they drift by fractions of a rupee on sum/multiply, which
+// undermines the entire "precision over noise" pitch. Decimal is stored
+// as TEXT on SQLite and NUMERIC on Postgres (see Prisma docs).
 generator client {
   provider = "prisma-client-js"
 }
@@ -28,13 +34,14 @@ model Tenant {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  tenantId  String?
-  email     String   @unique
-  name      String?
-  role      String   @default("viewer") // viewer|reviewer|admin
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  tenantId     String?
+  email        String   @unique
+  name         String?
+  role         String   @default("viewer") // viewer|reviewer|admin
+  passwordHash String?  // scrypt:<salt>:<hash> — null for SSO-only users (not yet implemented)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   tenant        Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   reviewedFindings Finding[] @relation("ReviewerFindings")
@@ -73,7 +80,7 @@ model Contract {
   effectiveDate   DateTime
   endDate         DateTime?
   currency        String    @default("INR")
-  totalValue      Float?    // TODO: Decimal after Postgres migration
+  totalValue      Decimal?  // contract value in `currency`
   rawText         String?   // original SOW text
   status          String    @default("active") // draft|active|expired|terminated
   extractedJson   String?   // LLM-extracted structured payload (JSON string)
@@ -100,7 +107,7 @@ model ChangeOrder {
   contractId   String
   title        String
   description  String
-  value        Float?
+  value        Decimal? 
   signedDate   DateTime
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -114,9 +121,9 @@ model LineItem {
   id           String   @id @default(cuid())
   contractId   String
   description  String
-  rate         Float?
+  rate         Decimal? // per-unit price in `currency`
   rateUnit     String? // hour|day|story-point|fixed|month
-  quantity     Float?
+  quantity     Float?   // count of billable units (not money — keep Float)
   milestone    String?
   deliveryDate DateTime?
   createdAt    DateTime @default(now())
@@ -134,7 +141,7 @@ model Milestone {
   externalId  String?  // e.g. "M1"
   description String
   dueDate     DateTime?
-  value       Float?
+  value       Decimal? 
   currency    String   @default("INR")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -262,7 +269,7 @@ model Invoice {
   issueDate    DateTime
   dueDate      DateTime?
   status       String    @default("issued") // draft|issued|paid|overdue|void
-  total        Float
+  total        Decimal   
   currency     String    @default("INR")
   deletedAt    DateTime? // soft-delete
   createdAt    DateTime  @default(now())
@@ -284,7 +291,7 @@ model InvoiceLine {
   id           String   @id @default(cuid())
   invoiceId    String
   description  String
-  amount       Float
+  amount       Decimal  
   periodStart  DateTime?
   periodEnd    DateTime?
   createdAt    DateTime @default(now())
@@ -298,7 +305,7 @@ model InvoiceLine {
 model Payment {
   id          String   @id @default(cuid())
   invoiceId   String
-  amount      Float
+  amount      Decimal  
   currency    String   @default("INR")
   paidAt      DateTime
   method      String?  // bank_transfer|card|cheque|upi
@@ -323,9 +330,9 @@ model Finding {
   type            String    // missed_milestone|unbilled_overage|scope_expansion|rate_discrepancy|unauthorized_work
   title           String
   summary         String
-  impactAmount    Float?    // INR value at stake
+  impactAmount    Decimal?  // INR value at stake
   confidence      String    // HIGH|MEDIUM|LOW
-  confidenceScore Float?    // 0.0-1.0 composite
+  confidenceScore Float?    // 0.0-1.0 composite (NOT money — keep Float)
   assessment      String    // billable|already_covered|ambiguous
   recommendedAction String  // approve|dismiss|request_review|draft_change_order
   status          String    @default("pending_review") // pending_review|approved|dismissed|escalated

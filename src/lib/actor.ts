@@ -1,23 +1,48 @@
 import { cookies, headers } from 'next/headers'
 
 /**
- * Derive the current actor (user identity) from the request context.
+ * Request-context helpers for API routes.
  *
- * Today this is a placeholder that reads an optional `X-ShipLedger-Actor`
- * header (set by middleware when sessions are wired) or falls back to
- * `'anonymous'`. Once next-auth is configured, this should pull the email
- * from the session instead.
+ * Auth model (see src/lib/auth.ts):
+ *   - Middleware verifies the JWT on every request and stamps the
+ *     VERIFIED identity into these headers: `x-shipledger-actor`
+ *     (email), `x-shipledger-user-id`, `x-shipledger-role`.
+ *   - `getCurrentActor()` / `getRequestActor()` / `getRequestId()` read
+ *     those VERIFIED headers — they never read the client-supplied
+ *     `x-shipledger-actor` header. That was the spoofing hole the
+ *     audit flagged (the body-fixed `actor` field was closed, but the
+ *     header-stamped version had the identical bug one layer down).
  *
- * Hardcoded fallbacks like `'intake@shipledger'` and `'reviewer@shipledger'`
- * are explicitly forbidden — see the audit log trust-anchor concerns.
+ * For role gating, prefer `requireRole(...)` / `requireActor()` from
+ * `src/lib/auth.ts` — these throw AuthError(401/403) which withErrorHandler
+ * maps correctly. The `getCurrentActor()` here returns `'anonymous'` for
+ * unauthenticated calls — used only by audit-log entries that legitimately
+ * need to record an unauthenticated attempt.
+ */
+
+/**
+ * The actor email stamped by middleware from the verified JWT.
+ * Returns `'anonymous'` if no verified actor (unauthenticated request).
  */
 export async function getCurrentActor(): Promise<string> {
   const h = await headers()
+  // The `x-shipledger-actor` header is set BY MIDDLEWARE from verified
+  // JWT claims — NOT from a client-supplied header. (Clients can still
+  // SEND the header, but middleware overwrites it after JWT verification.)
   const fromHeader = h.get('x-shipledger-actor')
   if (fromHeader && fromHeader.length > 0 && fromHeader.length <= 254) {
     return fromHeader
   }
   return 'anonymous'
+}
+
+/**
+ * The verified user ID stamped by middleware from the JWT, or null.
+ * Use this for FK writes (`AuditLog.actorId`, `Finding.reviewedById`).
+ */
+export async function getCurrentUserId(): Promise<string | null> {
+  const h = await headers()
+  return h.get('x-shipledger-user-id')
 }
 
 /**

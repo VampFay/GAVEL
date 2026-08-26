@@ -2,7 +2,8 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { ok, notFound, invalidRequest, withErrorHandler } from '@/lib/api'
 import { AckAlertSchema, ToggleMonitoringSchema } from '@/lib/schemas'
-import { getCurrentActor, getRequestId } from '@/lib/actor'
+import { getRequestId } from '@/lib/actor'
+import { requireRole } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +14,8 @@ export const dynamic = 'force-dynamic'
  *
  * Wires up the previously fake ackAlert (was fire-and-forget local state)
  * and the previously inert <Switch> in monitoring-view.tsx.
+ *
+ * Auth: reviewer+ (anyone who can act on findings can ack alerts).
  */
 export const PATCH = withErrorHandler(
   async (
@@ -20,6 +23,10 @@ export const PATCH = withErrorHandler(
     { params }: { params: Promise<{ id: string }> }
   ) => {
     const { id } = await params
+
+    // Authorization: reviewer+ to ack alerts or toggle monitoring.
+    const actor = await requireRole(['reviewer', 'admin'])
+    const requestId = await getRequestId()
 
     const text = await req.text()
     let body: unknown
@@ -31,25 +38,26 @@ export const PATCH = withErrorHandler(
 
     const action = (body as { action?: string }).action
 
-    const actor = await getCurrentActor()
-    const requestId = await getRequestId()
-
     if (action === 'toggle') {
       const parsed = ToggleMonitoringSchema.safeParse(body)
       if (!parsed.success) return invalidRequest(parsed.error)
-      const updated = await db.monitoredProject.update({
-        where: { id },
-        data: { alertsEnabled: parsed.data.alertsEnabled },
-      })
-      await db.auditLog.create({
-        data: {
-          actor,
-          action: 'toggle_monitoring',
-          entityType: 'monitored_project',
-          entityId: id,
-          detail: `alertsEnabled -> ${parsed.data.alertsEnabled}`,
-          requestId: requestId ?? undefined,
-        },
+      const updated = await db.$transaction(async tx => {
+        const m = await tx.monitoredProject.update({
+          where: { id },
+          data: { alertsEnabled: parsed.data.alertsEnabled },
+        })
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.id,
+            actor: actor.email,
+            action: 'toggle_monitoring',
+            entityType: 'monitored_project',
+            entityId: id,
+            detail: `alertsEnabled -> ${parsed.data.alertsEnabled}`,
+            requestId: requestId ?? undefined,
+          },
+        })
+        return m
       })
       return ok({ monitored: updated })
     }
@@ -57,22 +65,27 @@ export const PATCH = withErrorHandler(
     if (action === 'ack' || action === 'unack') {
       const parsed = AckAlertSchema.safeParse(body)
       if (!parsed.success) return invalidRequest(parsed.error)
-      const updated = await db.alert.update({
-        where: { id },
-        data: {
-          acknowledged: parsed.data.acknowledged,
-          acknowledgedAt: parsed.data.acknowledged ? new Date() : null,
-        },
-      })
-      await db.auditLog.create({
-        data: {
-          actor,
-          action: action === 'ack' ? 'ack_alert' : 'unack_alert',
-          entityType: 'alert',
-          entityId: id,
-          detail: `Alert ${action}ed`,
-          requestId: requestId ?? undefined,
-        },
+      const updated = await db.$transaction(async tx => {
+        const a = await tx.alert.update({
+          where: { id },
+          data: {
+            acknowledged: parsed.data.acknowledged,
+            acknowledgedAt: parsed.data.acknowledged ? new Date() : null,
+            acknowledgedById: parsed.data.acknowledged ? actor.id : null,
+          },
+        })
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.id,
+            actor: actor.email,
+            action: action === 'ack' ? 'ack_alert' : 'unack_alert',
+            entityType: 'alert',
+            entityId: id,
+            detail: `Alert ${action}ed`,
+            requestId: requestId ?? undefined,
+          },
+        })
+        return a
       })
       return ok({ alert: updated })
     }

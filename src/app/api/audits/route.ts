@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { ok } from '@/lib/api'
+import { money, sumMoney } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,17 +62,19 @@ export async function GET() {
     const findings = contract?.findings ?? []
 
     // Single reduce pass over findings for this client.
-    let totalImpact = 0
-    let approvedImpact = 0
+    // Money sums accumulate in Decimal.js (via sumMoney) to avoid IEEE-754
+    // drift on the `totalImpact` / `approvedImpact` aggregates.
+    const nonDismissed: number[] = []
+    const approvedImpacts: number[] = []
     let pendingReview = 0
     let approved = 0
     let dismissed = 0
     let escalated = 0
     for (const f of findings) {
-      const impact = f.impactAmount ?? 0
-      if (f.status !== 'dismissed') totalImpact += impact
+      const impact = money(f.impactAmount) ?? 0
+      if (f.status !== 'dismissed') nonDismissed.push(impact)
       if (f.status === 'approved') {
-        approvedImpact += impact
+        approvedImpacts.push(impact)
         approved++
       } else if (f.status === 'pending_review') {
         pendingReview++
@@ -89,7 +92,7 @@ export async function GET() {
       sizeBand: c.sizeBand,
       contractId: contract?.id ?? null,
       contractTitle: contract?.title ?? null,
-      totalValue: contract?.totalValue ?? null,
+      totalValue: money(contract?.totalValue ?? null),
       currency: contract?.currency ?? 'INR',
       effectiveDate: contract?.effectiveDate ?? null,
       endDate: contract?.endDate ?? null,
@@ -101,8 +104,8 @@ export async function GET() {
       approved,
       dismissed,
       escalated,
-      totalImpact,
-      approvedImpact,
+      totalImpact: sumMoney(nonDismissed),
+      approvedImpact: sumMoney(approvedImpacts),
       monitored: !!project?.monitored,
     }
   })
