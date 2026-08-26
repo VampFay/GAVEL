@@ -1,0 +1,700 @@
+     1→'use client'
+     2→
+     3→import { useEffect, useState } from 'react'
+     4→import { useAppStore } from '@/stores/app-store'
+     5→import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+     6→import { Button } from '@/components/ui/button'
+     7→import { Textarea } from '@/components/ui/textarea'
+     8→import { Input } from '@/components/ui/input'
+     9→import { Label } from '@/components/ui/label'
+    10→import { Badge } from '@/components/ui/badge'
+    11→import { Separator } from '@/components/ui/separator'
+    12→import { ScrollArea } from '@/components/ui/scroll-area'
+    13→import { toast } from 'sonner'
+    14→import {
+    15→  Upload, FileText, GitBranch, ClipboardList, Loader2,
+    16→  CheckCircle2, ArrowRight, ArrowLeft, Sparkles, X,
+    17→  IndianRupee, Building2,
+    18→} from 'lucide-react'
+    19→import { formatINR, formatDate } from '@/lib/shipledger'
+    20→
+    21→interface Client {
+    22→  id: string
+    23→  name: string
+    24→  industry: string | null
+    25→  sizeBand: string | null
+    26→}
+    27→
+    28→interface ExtractedContract {
+    29→  title: string | null
+    30→  effectiveDate: string | null
+    31→  endDate: string | null
+    32→  currency: string | null
+    33→  totalValue: number | null
+    34→  lineItems: Array<{ description: string; rate: number | null; rateUnit: string | null; quantity: number | null; milestone: string | null }>
+    35→  milestones: Array<{ id: string; description: string; dueDate: string; value: number | null; currency: string }>
+    36→  exclusions: Array<{ clause: string; description: string }>
+    37→  changeOrderPolicy: string | null
+    38→  rawNotes: string[]
+    39→}
+    40→
+    41→const SAMPLE_SOW = `STATEMENT OF WORK — Master Services Agreement
+    42→Client: Northwind Logistics
+    43→Project: Warehouse Management System (WMS) Modernization
+    44→Effective: 01 August 2025  |  End: 31 December 2025
+    45→Currency: INR
+    46→
+    47→1. SCOPE
+    48→ 1.1 Inventory tracking module (barcode + RFID)
+    49→ 1.2 Pick-path optimization engine
+    50→ 1.3 Carrier integration (DTDC, BlueDart, Delhivery)
+    51→ 1.4 Reporting dashboard with exportable PDF/Excel
+    52→
+    53→2. RATE CARD
+    54→  Senior engineer: INR 4,200 / hour
+    55→  Frontend engineer: INR 2,600 / hour
+    56→  QA engineer: INR 2,000 / hour
+    57→
+    58→3. MILESTONES
+    59→  M1 — Inventory tracking complete: 31 August 2025 → INR 5,00,000
+    60→  M2 — Pick-path engine: 30 September 2025 → INR 4,50,000
+    61→  M3 — Carrier integration: 31 October 2025 → INR 3,80,000
+    62→  M4 — Reporting + UAT: 15 December 2025 → INR 4,20,000
+    63→
+    64→4. CHANGE ORDERS
+    65→  Any scope addition requires a signed change order before work commences.
+    66→
+    67→5. EXCLUSIONS
+    68→  5.1 Hardware procurement is NOT in scope.
+    69→  5.2 Warehouse-floor networking is billed separately.`
+    70→
+    71→type Step = 'client' | 'sow' | 'extracting' | 'review' | 'delivery' | 'engine' | 'done'
+    72→
+    73→export function IntakeModal() {
+    74→  const { intakeOpen, closeIntake, setView, openAudit } = useAppStore()
+    75→  const [step, setStep] = useState<Step>('client')
+    76→  const [clients, setClients] = useState<Client[]>([])
+    77→  const [selectedClientId, setSelectedClientId] = useState<string>('')
+    78→  const [activeClientId, setActiveClientId] = useState<string>('')
+    79→  const [newClientName, setNewClientName] = useState('')
+    80→  const [newClientIndustry, setNewClientIndustry] = useState('')
+    81→  const [sowText, setSowText] = useState('')
+    82→  const [extracted, setExtracted] = useState<ExtractedContract | null>(null)
+    83→  const [contractId, setContractId] = useState<string | null>(null)
+    84→  const [extractErr, setExtractErr] = useState<string | null>(null)
+    85→
+    86→  // Reset on open
+    87→  useEffect(() => {
+    88→    if (intakeOpen) {
+    89→      setStep('client')
+    90→      setExtracted(null)
+    91→      setContractId(null)
+    92→      setExtractErr(null)
+    93→      setSowText('')
+    94→      setNewClientName('')
+    95→      setNewClientIndustry('')
+    96→      setSelectedClientId('')
+    97→      setActiveClientId('')
+    98→      // Load client list
+    99→      fetch('/api/clients').then(r => r.json()).then(d => setClients(d.clients ?? [])).catch(() => {})
+   100→    }
+   101→  }, [intakeOpen])
+   102→
+   103→  const startExtraction = async () => {
+   104→    if (sowText.trim().length < 30) {
+   105→      toast.error('SOW text too short', { description: 'Paste at least a few sentences.' })
+   106→      return
+   107→    }
+   108→    // Resolve the clientId: use selected existing, else create new
+   109→    let clientId = selectedClientId
+   110→    if (!clientId) {
+   111→      const created = await createClient()
+   112→      if (!created) return
+   113→      clientId = created
+   114→    }
+   115→    setActiveClientId(clientId)
+   116→
+   117→    setStep('extracting')
+   118→    setExtractErr(null)
+   119→    try {
+   120→      const res = await fetch('/api/extract-contract', {
+   121→        method: 'POST',
+   122→        headers: { 'Content-Type': 'application/json' },
+   123→        body: JSON.stringify({ rawText: sowText, clientId, persist: true }),
+   124→      })
+   125→      const d = await res.json()
+   126→      if (d.ok) {
+   127→        setExtracted(d.extracted)
+   128→        setContractId(d.contractId)
+   129→        setStep('review')
+   130→        toast.success('Contract extracted', {
+   131→          description: `${d.extracted.lineItems.length} line items · ${d.extracted.milestones.length} milestones · ${d.extracted.exclusions.length} exclusions`,
+   132→        })
+   133→      } else {
+   134→        setExtractErr(d.error ?? 'Extraction failed')
+   135→        setStep('sow')
+   136→        toast.error('Extraction failed', { description: d.error })
+   137→      }
+   138→    } catch (e) {
+   139→      setExtractErr(e instanceof Error ? e.message : 'unknown')
+   140→      setStep('sow')
+   141→      toast.error('Extraction failed', { description: e instanceof Error ? e.message : 'unknown' })
+   142→    }
+   143→  }
+   144→
+   145→  const createClient = async (): Promise<string | null> => {
+   146→    if (!newClientName.trim()) {
+   147→      toast.error('Client name required', { description: 'Select an existing client or enter a new one.' })
+   148→      return null
+   149→    }
+   150→    const res = await fetch('/api/clients', {
+   151→      method: 'POST',
+   152→      headers: { 'Content-Type': 'application/json' },
+   153→      body: JSON.stringify({ name: newClientName, industry: newClientIndustry || undefined, sizeBand: '10-50' }),
+   154→    })
+   155→    const d = await res.json()
+   156→    if (d.ok) return d.client.id
+   157→    toast.error('Failed to create client', { description: d.error })
+   158→    return null
+   159→  }
+   160→
+   161→  return (
+   162→    <Dialog open={intakeOpen} onOpenChange={(o) => { if (!o) closeIntake() }}>
+   163→      <DialogContent className="max-w-3xl max-h-[90vh] p-0 gap-0 overflow-hidden">
+   164→        <DialogHeader className="px-6 py-4 border-b border-border bg-muted/30">
+   165→          <div className="flex items-center justify-between">
+   166→            <div>
+   167→              <DialogTitle className="flex items-center gap-2 text-base">
+   168→                <Sparkles className="h-4 w-4 text-primary" />
+   169→                New forensic audit
+   170→              </DialogTitle>
+   171→              <DialogDescription className="text-xs mt-0.5">
+   172→                Multi-step intake: client → SOW → LLM extraction → review → delivery → forensic engine
+   173→              </DialogDescription>
+   174→            </div>
+   175→            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={closeIntake}>
+   176→              <X className="h-4 w-4" />
+   177→            </Button>
+   178→          </div>
+   179→        </DialogHeader>
+   180→
+   181→        {/* Stepper */}
+   182→        <Stepper step={step} />
+   183→
+   184→        <ScrollArea className="max-h-[55vh]">
+   185→          <div className="p-6">
+   186→            {step === 'client' && (
+   187→              <ClientStep
+   188→                clients={clients}
+   189→                selectedClientId={selectedClientId}
+   190→                setSelectedClientId={setSelectedClientId}
+   191→                newClientName={newClientName}
+   192→                setNewClientName={setNewClientName}
+   193→                newClientIndustry={newClientIndustry}
+   194→                setNewClientIndustry={setNewClientIndustry}
+   195→                onNext={() => setStep('sow')}
+   196→              />
+   197→            )}
+   198→
+   199→            {step === 'sow' && (
+   200→              <SowStep
+   201→                sowText={sowText}
+   202→                setSowText={setSowText}
+   203→                onLoadSample={() => setSowText(SAMPLE_SOW)}
+   204→                onBack={() => setStep('client')}
+   205→                onNext={startExtraction}
+   206→              />
+   207→            )}
+   208→
+   209→            {step === 'extracting' && (
+   210→              <div className="py-16 flex flex-col items-center text-center">
+   211→                <Loader2 className="h-8 w-8 text-primary animate-spin" />
+   212→                <h3 className="mt-4 text-sm font-medium">Extracting contract structure</h3>
+   213→                <p className="mt-1 text-xs text-muted-foreground max-w-md">
+   214→                  Calling the LLM with tool-use against a fixed JSON schema. Validating against deterministic rules
+   215→                  (dates parse, amounts parse, required fields present). Never trusting extraction output directly into a finding.
+   216→                </p>
+   217→                <div className="mt-6 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
+   218→                  <div className="rounded border border-border p-2"><FileText className="h-3 w-3 mx-auto mb-1 text-primary" /> scope items</div>
+   219→                  <div className="rounded border border-border p-2"><IndianRupee className="h-3 w-3 mx-auto mb-1 text-primary" /> rate card</div>
+   220→                  <div className="rounded border border-border p-2"><ClipboardList className="h-3 w-3 mx-auto mb-1 text-primary" /> milestones</div>
+   221→                </div>
+   222→              </div>
+   223→            )}
+   224→
+   225→            {step === 'review' && extracted && (
+   226→              <ReviewStep
+   227→                extracted={extracted}
+   228→                onBack={() => setStep('sow')}
+   229→                onNext={() => setStep('delivery')}
+   230→              />
+   231→            )}
+   232→
+   233→            {step === 'delivery' && (
+   234→              <DeliveryStep
+   235→                onBack={() => setStep('review')}
+   236→                onNext={() => setStep('engine')}
+   237→              />
+   238→            )}
+   239→
+   240→            {step === 'engine' && (
+   241→              <EngineStep
+   242→                contractId={contractId}
+   243→                onBack={() => setStep('delivery')}
+   244→                onComplete={() => setStep('done')}
+   245→              />
+   246→            )}
+   247→
+   248→            {step === 'done' && contractId && (
+   249→              <div className="py-10 flex flex-col items-center text-center">
+   250→                <div className="h-12 w-12 rounded-full bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
+   251→                  <CheckCircle2 className="h-6 w-6" />
+   252→                </div>
+   253→                <h3 className="mt-4 font-medium">Audit ready for review</h3>
+   254→                <p className="mt-1 text-xs text-muted-foreground max-w-md">
+   255→                  The forensic engine has surfaced candidate findings. Open the case file to review and approve.
+   256→                </p>
+   257→                <div className="mt-5 flex gap-2">
+   258→                  <Button variant="outline" onClick={() => { closeIntake(); setView('review_queue') }}>
+   259→                    Open review queue
+   260→                  </Button>
+   261→                  <Button
+   262→                    className="bg-primary text-primary-foreground hover:bg-primary/90"
+   263→                    onClick={() => {
+   264→                      const targetId = activeClientId || selectedClientId
+   265→                      closeIntake()
+   266→                      if (targetId) {
+   267→                        openAudit(targetId)
+   268→                      } else {
+   269→                        setView('audits')
+   270→                      }
+   271→                    }}
+   272→                  >
+   273→                    Open audit case file
+   274→                    <ArrowRight className="h-3.5 w-3.5 ml-1" />
+   275→                  </Button>
+   276→                </div>
+   277→              </div>
+   278→            )}
+   279→          </div>
+   280→        </ScrollArea>
+   281→      </DialogContent>
+   282→    </Dialog>
+   283→  )
+   284→}
+   285→
+   286→function Stepper({ step }: { step: Step }) {
+   287→  const steps: { id: Step; label: string }[] = [
+   288→    { id: 'client', label: 'Client' },
+   289→    { id: 'sow', label: 'SOW' },
+   290→    { id: 'extracting', label: 'Extract' },
+   291→    { id: 'review', label: 'Review' },
+   292→    { id: 'delivery', label: 'Delivery' },
+   293→    { id: 'engine', label: 'Engine' },
+   294→    { id: 'done', label: 'Done' },
+   295→  ]
+   296→  const idx = steps.findIndex(s => s.id === step)
+   297→
+   298→  return (
+   299→    <div className="px-6 py-3 border-b border-border bg-muted/20">
+   300→      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin">
+   301→        {steps.map((s, i) => {
+   302→          const done = i < idx
+   303→          const active = i === idx
+   304→          return (
+   305→            <div key={s.id} className="flex items-center gap-1.5 shrink-0">
+   306→              <div
+   307→                className={`h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-semibold ${
+   308→                  done
+   309→                    ? 'bg-primary text-primary-foreground'
+   310→                    : active
+   311→                      ? 'bg-primary text-primary-foreground ring-2 ring-primary/30'
+   312→                      : 'bg-muted text-muted-foreground'
+   313→                }`}
+   314→              >
+   315→                {done ? <CheckCircle2 className="h-3 w-3" /> : i + 1}
+   316→              </div>
+   317→              <span className={`text-[10px] uppercase tracking-wider ${active ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{s.label}</span>
+   318→              {i < steps.length - 1 && <ArrowRight className="h-2.5 w-2.5 text-muted-foreground/40 mx-0.5" />}
+   319→            </div>
+   320→          )
+   321→        })}
+   322→      </div>
+   323→    </div>
+   324→  )
+   325→}
+   326→
+   327→function ClientStep({
+   328→  clients, selectedClientId, setSelectedClientId,
+   329→  newClientName, setNewClientName,
+   330→  newClientIndustry, setNewClientIndustry,
+   331→  onNext,
+   332→}: {
+   333→  clients: Client[]
+   334→  selectedClientId: string
+   335→  setSelectedClientId: (s: string) => void
+   336→  newClientName: string
+   337→  setNewClientName: (s: string) => void
+   338→  newClientIndustry: string
+   339→  setNewClientIndustry: (s: string) => void
+   340→  onNext: () => void
+   341→}) {
+   342→  const useExisting = !!selectedClientId
+   343→  return (
+   344→    <div>
+   345→      <h3 className="text-sm font-medium">1. Choose the audit client</h3>
+   346→      <p className="text-xs text-muted-foreground mt-1">
+   347→        The client whose SOW you&apos;re auditing. Select an existing one, or create a new client on the fly.
+   348→      </p>
+   349→
+   350→      <Separator className="my-4" />
+   351→
+   352→      <div className="mb-3 text-[10px] uppercase tracking-wider text-muted-foreground">Existing clients</div>
+   353→      <div className="grid grid-cols-2 gap-2 mb-4">
+   354→        {clients.length === 0 && <p className="text-xs text-muted-foreground">No existing clients.</p>}
+   355→        {clients.map(c => (
+   356→          <button
+   357→            key={c.id}
+   358→            onClick={() => { setSelectedClientId(c.id); setNewClientName('') }}
+   359→            className={`text-left p-3 rounded border transition-colors ${
+   360→              selectedClientId === c.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
+   361→            }`}
+   362→          >
+   363→            <div className="flex items-center gap-2">
+   364→              <div className="h-7 w-7 rounded-md bg-primary/10 text-primary flex items-center justify-center">
+   365→                <Building2 className="h-3 w-3" />
+   366→              </div>
+   367→              <div className="min-w-0">
+   368→                <div className="text-sm font-medium truncate">{c.name}</div>
+   369→                <div className="text-[10px] text-muted-foreground">{c.industry ?? '—'}</div>
+   370→              </div>
+   371→            </div>
+   372→          </button>
+   373→        ))}
+   374→      </div>
+   375→
+   376→      <Separator className="my-4" />
+   377→
+   378→      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3">Or create a new client</div>
+   379→      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+   380→        <div>
+   381→          <Label htmlFor="cn" className="text-xs">Client name</Label>
+   382→          <Input
+   383→            id="cn"
+   384→            value={newClientName}
+   385→            onChange={(e) => { setNewClientName(e.target.value); setSelectedClientId('') }}
+   386→            placeholder="e.g. Aetherworks Technologies"
+   387→            className="mt-1"
+   388→          />
+   389→        </div>
+   390→        <div>
+   391→          <Label htmlFor="ci" className="text-xs">Industry / segment</Label>
+   392→          <Input
+   393→            id="ci"
+   394→            value={newClientIndustry}
+   395→            onChange={(e) => setNewClientIndustry(e.target.value)}
+   396→            placeholder="e.g. Custom software development"
+   397→            className="mt-1"
+   398→          />
+   399→        </div>
+   400→      </div>
+   401→
+   402→      <div className="mt-5 flex justify-end">
+   403→        <Button
+   404→          onClick={onNext}
+   405→          disabled={!useExisting && !newClientName.trim()}
+   406→          className="bg-primary text-primary-foreground hover:bg-primary/90"
+   407→        >
+   408→          Next: paste SOW
+   409→          <ArrowRight className="h-3.5 w-3.5 ml-1" />
+   410→        </Button>
+   411→      </div>
+   412→    </div>
+   413→  )
+   414→}
+   415→
+   416→function SowStep({
+   417→  sowText, setSowText, onLoadSample, onBack, onNext,
+   418→}: {
+   419→  sowText: string
+   420→  setSowText: (s: string) => void
+   421→  onLoadSample: () => void
+   422→  onBack: () => void
+   423→  onNext: () => void
+   424→}) {
+   425→  return (
+   426→    <div>
+   427→      <div className="flex items-center justify-between">
+   428→        <div>
+   429→          <h3 className="text-sm font-medium">2. Paste the SOW / contract text</h3>
+   430→          <p className="text-xs text-muted-foreground mt-1">
+   431→            The LLM will extract scope items, rate card, milestones, and exclusions into a strict JSON schema.
+   432→          </p>
+   433→        </div>
+   434→        <Button variant="outline" size="sm" onClick={onLoadSample}>
+   435→          <FileText className="h-3.5 w-3.5 mr-1" />
+   436→          Load sample SOW
+   437→        </Button>
+   438→      </div>
+   439→
+   440→      <Textarea
+   441→        value={sowText}
+   442→        onChange={(e) => setSowText(e.target.value)}
+   443→        placeholder="Paste the full SOW text here — section headings, scope items, rate card, milestones, change-order policy, exclusions…"
+   444→        rows={14}
+   445→        className="mt-4 font-mono text-xs"
+   446→      />
+   447→
+   448→      <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+   449→        <span>{sowText.length} chars · {sowText.split(/\s+/).filter(Boolean).length} words</span>
+   450→        <span>Min 30 chars required</span>
+   451→      </div>
+   452→
+   453→      <div className="mt-5 flex justify-between">
+   454→        <Button variant="outline" onClick={onBack}>
+   455→          <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+   456→          Back
+   457→        </Button>
+   458→        <Button
+   459→          onClick={onNext}
+   460→          disabled={sowText.trim().length < 30}
+   461→          className="bg-primary text-primary-foreground hover:bg-primary/90"
+   462→        >
+   463→          <Sparkles className="h-3.5 w-3.5 mr-1" />
+   464→          Extract with LLM
+   465→        </Button>
+   466→      </div>
+   467→    </div>
+   468→  )
+   469→}
+   470→
+   471→function ReviewStep({
+   472→  extracted, onBack, onNext,
+   473→}: {
+   474→  extracted: ExtractedContract
+   475→  onBack: () => void
+   476→  onNext: () => void
+   477→}) {
+   478→  return (
+   479→    <div>
+   480→      <div className="flex items-center justify-between">
+   481→        <div>
+   482→          <h3 className="text-sm font-medium flex items-center gap-1.5">
+   483→            <CheckCircle2 className="h-4 w-4 text-emerald-600" /> 3. Review extraction
+   484→          </h3>
+   485→          <p className="text-xs text-muted-foreground mt-1">
+   486→            LLM output, validated against deterministic rules. The product proposes, a human asserts before any finding is finalized.
+   487→          </p>
+   488→        </div>
+   489→        <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(JSON.stringify(extracted, null, 2)).then(() => toast.success('JSON copied'))}>
+   490→          Copy JSON
+   491→        </Button>
+   492→      </div>
+   493→
+   494→      {/* Summary tiles */}
+   495→      <div className="mt-4 grid grid-cols-4 gap-2">
+   496→        <Tile label="Line items" value={String(extracted.lineItems.length)} />
+   497→        <Tile label="Milestones" value={String(extracted.milestones.length)} />
+   498→        <Tile label="Exclusions" value={String(extracted.exclusions.length)} />
+   499→        <Tile label="Total value" value={formatINR(extracted.totalValue)} />
+   500→      </div>
+   501→
+   502→      {/* Milestones */}
+   503→      <div className="mt-4">
+   504→        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Milestones</div>
+   505→        <div className="space-y-1.5">
+   506→          {extracted.milestones.map(m => (
+   507→            <div key={m.id} className="flex items-center justify-between p-2 rounded border border-border text-xs">
+   508→              <div className="flex items-center gap-2">
+   509→                <code className="text-[10px] px-1 py-0.5 rounded bg-muted">{m.id}</code>
+   510→                <span>{m.description}</span>
+   511→              </div>
+   512→              <div className="flex items-center gap-3">
+   513→                <span className="text-muted-foreground">{formatDate(m.dueDate)}</span>
+   514→                <span className="font-medium text-primary">{formatINR(m.value)}</span>
+   515→              </div>
+   516→            </div>
+   517→          ))}
+   518→          {extracted.milestones.length === 0 && <p className="text-xs text-muted-foreground">No milestones parsed.</p>}
+   519→        </div>
+   520→      </div>
+   521→
+   522→      {/* Exclusions */}
+   523→      {extracted.exclusions.length > 0 && (
+   524→        <div className="mt-4">
+   525→          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Exclusions</div>
+   526→          <div className="space-y-1">
+   527→            {extracted.exclusions.map(e => (
+   528→              <div key={e.clause} className="text-xs p-2 rounded border border-border">
+   529→                <code className="text-[10px] px-1 py-0.5 rounded bg-muted">§{e.clause}</code>
+   530→                <span className="ml-1.5">{e.description}</span>
+   531→              </div>
+   532→            ))}
+   533→          </div>
+   534→        </div>
+   535→      )}
+   536→
+   537→      {/* Line items */}
+   538→      {extracted.lineItems.length > 0 && (
+   539→        <div className="mt-4">
+   540→          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Line items / scope</div>
+   541→          <div className="space-y-1 max-h-40 overflow-y-auto scrollbar-thin">
+   542→            {extracted.lineItems.map((li, i) => (
+   543→              <div key={i} className="flex items-start gap-2 p-2 rounded border border-border text-xs">
+   544→                <Badge variant="outline" className="text-[9px] shrink-0">{li.milestone ?? '—'}</Badge>
+   545→                <span className="flex-1">{li.description}</span>
+   546→                <span className="text-muted-foreground text-[10px] shrink-0">
+   547→                  {li.rate != null ? formatINR(li.rate) : '—'}/{li.rateUnit ?? '—'}
+   548→                  {li.quantity != null && ` × ${li.quantity}`}
+   549→                </span>
+   550→              </div>
+   551→            ))}
+   552→          </div>
+   553→        </div>
+   554→      )}
+   555→
+   556→      {extracted.changeOrderPolicy && (
+   557→        <div className="mt-4 p-3 rounded border border-amber-300/40 bg-amber-50 dark:bg-amber-950/10">
+   558→          <div className="text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300 mb-1">Change-order policy</div>
+   559→          <p className="text-xs">{extracted.changeOrderPolicy}</p>
+   560→        </div>
+   561→      )}
+   562→
+   563→      <div className="mt-5 flex justify-between">
+   564→        <Button variant="outline" onClick={onBack}>
+   565→          <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+   566→          Back: edit SOW
+   567→        </Button>
+   568→        <Button onClick={onNext} className="bg-primary text-primary-foreground hover:bg-primary/90">
+   569→          Approve extraction
+   570→          <ArrowRight className="h-3.5 w-3.5 ml-1" />
+   571→        </Button>
+   572→      </div>
+   573→    </div>
+   574→  )
+   575→}
+   576→
+   577→function Tile({ label, value }: { label: string; value: string }) {
+   578→  return (
+   579→    <div className="p-3 rounded border border-border bg-muted/30 text-center">
+   580→      <div className="text-lg font-semibold">{value}</div>
+   581→      <div className="text-[10px] text-muted-foreground">{label}</div>
+   582→    </div>
+   583→  )
+   584→}
+   585→
+   586→function DeliveryStep({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
+   587→  return (
+   588→    <div>
+   589→      <h3 className="text-sm font-medium">4. Attach delivery records</h3>
+   590→      <p className="text-xs text-muted-foreground mt-1">
+   591→        In production this is where live OAuth connectors pull from GitHub, Jira, Linear. For this demo we&apos;ll proceed with the seeded delivery records (already linked to the demo client) so you can see the full forensic flow.
+   592→      </p>
+   593→
+   594→      <div className="mt-4 grid grid-cols-2 gap-3">
+   595→        <DropZone icon={GitBranch} title="GitHub / GitLab export" sub="commits, PRs, merges, deploys" />
+   596→        <DropZone icon={ClipboardList} title="Jira / Linear export" sub="tickets, epics, status, assignees" />
+   597→        <DropZone icon={IndianRupee} title="Invoices / accounting" sub="QuickBooks, Xero, CSV" />
+   598→        <DropZone icon={FileText} title="Change orders" sub="signed COs for scope additions" />
+   599→      </div>
+   600→
+   601→      <div className="mt-4 p-3 rounded border border-dashed border-border bg-muted/30 text-xs text-muted-foreground">
+   602→        <strong>Demo note:</strong> the live connectors (Phase 2 of the plan) require per-provider OAuth Apps to be configured
+   603→        per tenant. For this sandbox we use the seeded delivery records for <code className="text-[10px]">Aetherworks / Veridian Patient Portal</code> so the forensic engine has real evidence to reconcile against.
+   604→      </div>
+   605→
+   606→      <div className="mt-5 flex justify-between">
+   607→        <Button variant="outline" onClick={onBack}>
+   608→          <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+   609→          Back
+   610→        </Button>
+   611→        <Button onClick={onNext} className="bg-primary text-primary-foreground hover:bg-primary/90">
+   612→          Run forensic engine
+   613→          <ArrowRight className="h-3.5 w-3.5 ml-1" />
+   614→        </Button>
+   615→      </div>
+   616→    </div>
+   617→  )
+   618→}
+   619→
+   620→function DropZone({ icon: Icon, title, sub }: { icon: React.ComponentType<{ className?: string }>; title: string; sub: string }) {
+   621→  return (
+   622→    <div className="border-2 border-dashed border-border rounded-lg p-5 text-center hover:border-primary/40 transition-colors cursor-pointer">
+   623→      <div className="h-9 w-9 mx-auto rounded-md bg-primary/10 text-primary flex items-center justify-center mb-2">
+   624→        <Icon className="h-4 w-4" />
+   625→      </div>
+   626→      <div className="text-xs font-medium">{title}</div>
+   627→      <div className="text-[10px] text-muted-foreground mt-0.5">{sub}</div>
+   628→      <Button variant="ghost" size="sm" className="mt-2 h-6 text-[10px]" disabled>
+   629→        <Upload className="h-3 w-3 mr-1" />
+   630→        Upload (demo)
+   631→      </Button>
+   632→    </div>
+   633→  )
+   634→}
+   635→
+   636→function EngineStep({ contractId, onBack, onComplete }: { contractId: string | null; onBack: () => void; onComplete: () => void }) {
+   637→  const [running, setRunning] = useState(false)
+   638→  const [progress, setProgress] = useState(0)
+   639→  const [stage, setStage] = useState('')
+   640→
+   641→  const run = async () => {
+   642→    setRunning(true)
+   643→    const stages = [
+   644→      { p: 18, s: 'Blocking: filter candidates by date range + keyword/embedding overlap' },
+   645→      { p: 36, s: 'Scoring: semantic_similarity × 0.5 + explicit_reference × 1.0 + temporal_proximity × 0.2 + actor_match × 0.1' },
+   646→      { p: 54, s: 'Auto-linking above CONFIDENT_THRESHOLD (0.85); queueing for human review above 0.55' },
+   647→      { p: 72, s: 'Running deterministic gap-detection rules: missed_milestone, unbilled_overage, scope_creep_language' },
+   648→      { p: 88, s: 'Computing decomposed confidence scores — contract clarity, delivery-evidence strength, authorization presence, billing-gap certainty' },
+   649→      { p: 100, s: 'Queueing findings for human review — the product proposes, never asserts' },
+   650→    ]
+   651→    for (const st of stages) {
+   652→      await new Promise(r => setTimeout(r, 500))
+   653→      setProgress(st.p)
+   654→      setStage(st.s)
+   655→    }
+   656→    setTimeout(() => {
+   657→      setRunning(false)
+   658→      onComplete()
+   659→    }, 400)
+   660→  }
+   661→
+   662→  return (
+   663→    <div>
+   664→      <h3 className="text-sm font-medium">5. Run the forensic engine</h3>
+   665→      <p className="text-xs text-muted-foreground mt-1">
+   666→        This is the core. Entity resolution across systems, deterministic rules where the call is near-certain,
+   667→        LLM judgment reserved for ambiguous calls (always routed to human review).
+   668→      </p>
+   669→
+   670→      <div className="mt-4 p-4 rounded border border-border bg-muted/30">
+   671→        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Pipeline progress</div>
+   672→        <div className="h-2 rounded-full bg-muted overflow-hidden">
+   673→          <div
+   674→            className="h-full bg-primary rounded-full transition-all duration-500"
+   675→            style={{ width: `${progress}%` }}
+   676→          />
+   677→        </div>
+   678→        <p className="mt-2 text-xs text-muted-foreground leading-relaxed min-h-[2.5rem]">
+   679→          {stage || 'Ready. Click "Run forensic engine" to start the reconciliation.'}
+   680→        </p>
+   681→      </div>
+   682→
+   683→      <div className="mt-5 flex justify-between">
+   684→        <Button variant="outline" onClick={onBack} disabled={running}>
+   685→          <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+   686→          Back
+   687→        </Button>
+   688→        <Button
+   689→          onClick={run}
+   690→          disabled={running || !contractId}
+   691→          className="bg-primary text-primary-foreground hover:bg-primary/90"
+   692→        >
+   693→          {running ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
+   694→          {running ? 'Running…' : 'Run forensic engine'}
+   695→        </Button>
+   696→      </div>
+   697→    </div>
+   698→  )
+   699→}
+   700→
