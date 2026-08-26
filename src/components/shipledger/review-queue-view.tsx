@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAppStore } from '@/stores/app-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,17 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import {
   ClipboardCheck,
   CheckCircle2,
@@ -18,6 +29,7 @@ import {
   Filter,
   IndianRupee,
   Scale,
+  RotateCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -25,6 +37,7 @@ import {
   confidenceColor, statusColor, assessmentLabel, recommendedActionLabel,
   evidenceTypeLabel, sourceLabel, sourceColor, formatDate, timeAgo,
 } from '@/lib/shipledger'
+import { apiGet, apiPatch } from '@/lib/fetch'
 
 interface Finding {
   id: string
@@ -41,7 +54,6 @@ interface Finding {
   billingState: string | null
   reviewNotes: string | null
   reviewedAt: string | null
-  reviewedBy: string | null
   createdAt: string
   project: { id: string; name: string } | null
   contract: { id: string; title: string } | null
@@ -63,55 +75,79 @@ export function ReviewQueueView() {
   const { openFinding } = useAppStore()
   const [findings, setFindings] = useState<Finding[] | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('pending_review')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
     setLoading(true)
-    fetch('/api/findings')
-      .then(r => r.json())
-      .then(d => {
-        setFindings(d.findings)
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
+    setError(null)
+    const { data: d, error: e } = await apiGet<{ findings: Finding[] }>('/api/findings', ctrl.signal)
+    if (e) {
+      setError(e.message)
+      toast.error('Failed to load findings', { description: e.message })
+    } else if (d) {
+      setFindings(d.findings)
+    }
+    setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    return () => abortRef.current?.abort()
+  }, [load])
 
   const takeAction = async (id: string, action: 'approve' | 'dismiss' | 'escalate') => {
     setActionLoading(id)
-    try {
-      const res = await fetch(`/api/findings/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, actor: 'reviewer@shipledger' }),
+    const { data: d, error: e } = await apiPatch<{ finding: Finding }>(`/api/findings/${id}`, {
+      action,
+      // No `actor` body field — the route derives identity from the
+      // request context (see src/lib/actor.ts).
+    })
+    if (e) {
+      toast.error('Action failed', { description: e.message })
+    } else if (d) {
+      toast.success(`Finding ${action}d`, {
+        description: action === 'approve'
+          ? 'Moved to approved — eligible for billing.'
+          : action === 'dismiss'
+            ? 'Marked as dismissed — excluded from case file.'
+            : 'Escalated to senior review.',
       })
-      const d = await res.json()
-      if (d.ok) {
-        toast.success(`Finding ${action}d`, {
-          description: action === 'approve'
-            ? 'Moved to approved — eligible for billing.'
-            : action === 'dismiss'
-              ? 'Marked as dismissed — excluded from case file.'
-              : 'Escalated to senior review.',
-        })
-        load()
-      } else {
-        toast.error('Action failed', { description: d.error })
-      }
-    } catch (e) {
-      toast.error('Action failed', { description: e instanceof Error ? e.message : 'unknown' })
-    } finally {
-      setActionLoading(null)
+      load()
     }
+    setActionLoading(null)
   }
 
   if (loading || !findings) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-3">
+      <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true">
         <Skeleton className="h-12 w-full" />
         {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <Card className="border-rose-200 dark:border-rose-900">
+          <CardContent className="p-8 text-center">
+            <div className="h-12 w-12 mx-auto rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 flex items-center justify-center mb-3">
+              <AlertCircle className="h-5 w-5" />
+            </div>
+            <p className="text-sm font-medium">Couldn&apos;t load findings</p>
+            <p className="text-xs text-muted-foreground mt-1">{error}</p>
+            <Button variant="outline" size="sm" onClick={load} className="mt-3">
+              <RotateCw className="h-3.5 w-3.5 mr-1.5" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
@@ -133,7 +169,7 @@ export function ReviewQueueView() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Review queue</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {counts.pendingReview} pending review · {formatINRCompact(totalImpact)} total identified · the product proposes, humans assert
+            {counts.pending_review} pending review · {formatINRCompact(totalImpact)} total identified · the product proposes, humans assert
           </p>
         </div>
       </div>
@@ -231,9 +267,7 @@ function FindingCard({
               <AnatomyRow label="Commercial baseline" value={finding.contractClause} />
               <AnatomyRow label="Billing state" value={finding.billingState} />
               <AnatomyRow label="Recommended" value={recommendedActionLabel(finding.recommendedAction)} />
-              {finding.reviewedAt && (
-                <AnatomyRow label="Reviewed" value={`${formatDate(finding.reviewedAt)} by ${finding.reviewedBy ?? '—'}`} />
-              )}
+              <AnatomyRow label="Reviewed" value={finding.reviewedAt ? formatDate(finding.reviewedAt) : null} />
             </div>
           </div>
 
@@ -278,39 +312,101 @@ function FindingCard({
           </Button>
           {isPending && (
             <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onAction(finding.id, 'dismiss')}
-                disabled={actionLoading}
-              >
-                <XCircle className="h-3.5 w-3.5 mr-1" />
-                Dismiss
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onAction(finding.id, 'escalate')}
-                disabled={actionLoading}
-                className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/30"
-              >
-                <AlertCircle className="h-3.5 w-3.5 mr-1" />
-                Escalate
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => onAction(finding.id, 'approve')}
-                disabled={actionLoading}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                Approve &amp; bill
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={actionLoading}
+                  >
+                    <XCircle className="h-3.5 w-3.5 mr-1" />
+                    Dismiss
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Dismiss this finding?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Dismissing removes the finding from the case file and excludes it from the total impact calculation. This action is logged to the audit trail and cannot be undone from the UI.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => onAction(finding.id, 'dismiss')}
+                      className="bg-muted text-foreground hover:bg-muted/80"
+                    >
+                      Yes, dismiss
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={actionLoading}
+                    className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                  >
+                    <AlertCircle className="h-3.5 w-3.5 mr-1" />
+                    Escalate
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Escalate to senior review?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Escalated findings are flagged for a senior reviewer to make the final call. The decision will be logged.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => onAction(finding.id, 'escalate')}
+                      className="border-amber-300 text-amber-700 hover:bg-amber-50 dark:text-amber-300"
+                    >
+                      Escalate
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    disabled={actionLoading}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                    Approve &amp; bill
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Approve &amp; bill this finding?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Approving marks this finding as billable and includes its impact ({formatINRCompact(finding.impactAmount)}) in the approved-impact total. The decision is logged to the immutable audit trail.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => onAction(finding.id, 'approve')}
+                      className="bg-primary text-primary-foreground hover:bg-primary/90"
+                    >
+                      Approve &amp; bill
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           )}
           {!isPending && finding.reviewNotes && (
             <div className="text-xs text-muted-foreground italic max-w-md">
-              &ldquo;{finding.reviewNotes}&rdquo; — {finding.reviewedBy}
+              &ldquo;{finding.reviewNotes}&rdquo;
             </div>
           )}
         </div>

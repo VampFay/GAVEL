@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useAppStore } from '@/stores/app-store'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -21,11 +21,15 @@ import {
   CheckCircle2,
   ArrowRight,
   CircleDot,
+  AlertCircle,
+  RotateCw,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   formatINR, formatINRCompact, formatDate, findingTypeLabel,
   confidenceColor, statusColor, assessmentLabel, recommendedActionLabel,
 } from '@/lib/shipledger'
+import { apiGet } from '@/lib/fetch'
 
 interface AuditDetail {
   ok: boolean
@@ -34,8 +38,8 @@ interface AuditDetail {
     name: string
     industry: string | null
     sizeBand: string | null
-    contactName: string | null
-    contactEmail: string | null
+    // contactName + contactEmail intentionally omitted (PII; route
+    // no longer returns them pending auth wiring).
   }
   contract: {
     id: string
@@ -57,7 +61,7 @@ interface AuditDetail {
     status: string
     startDate: string | null
     endDate: string | null
-    tickets: Array<{ id: string; externalId: string; title: string; type: string | null; status: string; assignee: string | null; updated: string }>
+    tickets: Array<{ id: string; externalId: string; title: string; type: string | null; status: string; assignee: string | null; externalUpdated: string | null }>
     codeActivities: Array<{ id: string; type: string; ref: string; title: string; author: string; timestamp: string; additions: number | null; deletions: number | null; filesChanged: number | null; url: string | null }>
     monitored: { id: string; alertsEnabled: boolean; driftBaseline: number | null } | null
   }
@@ -80,25 +84,58 @@ export function AuditDetailView() {
   const { activeAuditId, setView, openFinding } = useAppStore()
   const [data, setData] = useState<AuditDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const load = async () => {
+    if (!activeAuditId) return
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    setLoading(true)
+    setError(null)
+    const { data: d, error: e } = await apiGet<AuditDetail>(`/api/audits/${activeAuditId}`, ctrl.signal)
+    if (e) {
+      setError(e.message)
+      toast.error('Failed to load audit', { description: e.message })
+    } else if (d) {
+      setData(d)
+    }
+    setLoading(false)
+  }
 
   useEffect(() => {
-    if (!activeAuditId) return
-    setLoading(true)
-    fetch(`/api/audits/${activeAuditId}`)
-      .then(r => r.json())
-      .then(d => {
-        setData(d)
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
+    load()
+    return () => abortRef.current?.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAuditId])
 
   if (loading || !data) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-3">
+      <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true">
         <Skeleton className="h-12 w-full" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-72 w-full" />
+      </div>
+    )
+  }
+
+  if (error && !data) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <Card className="border-rose-200 dark:border-rose-900">
+          <CardContent className="p-8 text-center">
+            <div className="h-12 w-12 mx-auto rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 flex items-center justify-center mb-3">
+              <AlertCircle className="h-5 w-5" />
+            </div>
+            <p className="text-sm font-medium">Couldn&apos;t load audit</p>
+            <p className="text-xs text-muted-foreground mt-1">{error}</p>
+            <Button variant="outline" size="sm" onClick={load} className="mt-3">
+              <RotateCw className="h-3.5 w-3.5 mr-1.5" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }

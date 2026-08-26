@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAppStore } from '@/stores/app-store'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   ArrowLeft, FileText, GitBranch, ClipboardCheck, AlertTriangle,
   CheckCircle2, XCircle, AlertCircle, IndianRupee, ArrowRight,
-  Scale, Calendar, FileCheck2, ExternalLink,
+  Scale, Calendar, FileCheck2, RotateCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -19,6 +19,7 @@ import {
   confidenceColor, statusColor, assessmentLabel, recommendedActionLabel,
   evidenceTypeLabel, sourceLabel, sourceColor,
 } from '@/lib/shipledger'
+import { apiGet, apiPatch } from '@/lib/fetch'
 
 interface FindingDetail {
   ok: boolean
@@ -37,7 +38,6 @@ interface FindingDetail {
     billingState: string | null
     reviewNotes: string | null
     reviewedAt: string | null
-    reviewedBy: string | null
     createdAt: string
     project: { id: string; name: string; client?: { name: string } } | null
     contract: { id: string; title: string; totalValue: number | null; currency: string } | null
@@ -58,50 +58,76 @@ export function FindingDetailView() {
   const { activeFindingId, setView } = useAppStore()
   const [data, setData] = useState<FindingDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [notes, setNotes] = useState('')
+  const abortRef = useRef<AbortController | null>(null)
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     if (!activeFindingId) return
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
     setLoading(true)
-    fetch(`/api/findings/${activeFindingId}`)
-      .then(r => r.json())
-      .then(d => {
-        setData(d)
-        setNotes(d.finding?.reviewNotes ?? '')
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
+    setError(null)
+    const { data: d, error: e } = await apiGet<FindingDetail>(`/api/findings/${activeFindingId}`, ctrl.signal)
+    if (e) {
+      setError(e.message)
+      toast.error('Failed to load finding', { description: e.message })
+    } else if (d) {
+      setData(d)
+      setNotes(d.finding?.reviewNotes ?? '')
+    }
+    setLoading(false)
   }, [activeFindingId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    return () => abortRef.current?.abort()
+  }, [load])
 
   const takeAction = async (action: 'approve' | 'dismiss' | 'escalate') => {
     if (!activeFindingId) return
     setActionLoading(true)
-    try {
-      const res = await fetch(`/api/findings/${activeFindingId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, reviewNotes: notes, actor: 'reviewer@shipledger' }),
-      })
-      const d = await res.json()
-      if (d.ok) {
-        toast.success(`Finding ${action}d`)
-        load()
-      } else {
-        toast.error('Action failed', { description: d.error })
-      }
-    } finally {
-      setActionLoading(false)
+    const { data: d, error: e } = await apiPatch<FindingDetail>(`/api/findings/${activeFindingId}`, {
+      action,
+      reviewNotes: notes || undefined,
+      // No `actor` body field — route derives identity from request context.
+    })
+    if (e) {
+      toast.error('Action failed', { description: e.message })
+    } else if (d) {
+      toast.success(`Finding ${action}d`)
+      load()
     }
+    setActionLoading(false)
   }
 
   if (loading || !data) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-3">
+      <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true">
         <Skeleton className="h-12 w-full" />
         <Skeleton className="h-72 w-full" />
+      </div>
+    )
+  }
+
+  if (error && !data) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <Card className="border-rose-200 dark:border-rose-900">
+          <CardContent className="p-8 text-center">
+            <div className="h-12 w-12 mx-auto rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 flex items-center justify-center mb-3">
+              <AlertCircle className="h-5 w-5" />
+            </div>
+            <p className="text-sm font-medium">Couldn&apos;t load finding</p>
+            <p className="text-xs text-muted-foreground mt-1">{error}</p>
+            <Button variant="outline" size="sm" onClick={load} className="mt-3">
+              <RotateCw className="h-3.5 w-3.5 mr-1.5" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
@@ -319,7 +345,7 @@ export function FindingDetailView() {
               </div>
               {f.reviewedAt && (
                 <div className="mt-3 pt-3 border-t border-border text-xs text-muted-foreground">
-                  Last reviewed {formatDate(f.reviewedAt)} by {f.reviewedBy ?? '—'}
+                  Last reviewed {formatDate(f.reviewedAt)}
                 </div>
               )}
             </CardContent>
@@ -331,17 +357,11 @@ export function FindingDetailView() {
             </CardHeader>
             <CardContent>
               <p className="text-xs text-muted-foreground mb-3">
-                The case file is what you bring to the client conversation — every claim, the contract clause, the delivery evidence, the billing gap. Currently scoped to the Free diagnostic only when not on a paid audit tier.
+                The case file is what you bring to the client conversation — every claim, the contract clause, the delivery evidence, the billing gap.
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => toast.info('Case-file PDF export', { description: 'In production this calls the report-render service — see /download for the artifact.' })}
-              >
-                <ExternalLink className="h-3.5 w-3.5 mr-1" />
-                Generate PDF
-              </Button>
+              <p className="text-xs text-muted-foreground italic">
+                PDF export is on the roadmap — see §9.6 of the product plan. Not available in this build.
+              </p>
             </CardContent>
           </Card>
         </div>

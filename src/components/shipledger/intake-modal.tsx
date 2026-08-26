@@ -14,7 +14,7 @@ import { toast } from 'sonner'
 import {
   Upload, FileText, GitBranch, ClipboardList, Loader2,
   CheckCircle2, ArrowRight, ArrowLeft, Sparkles, X,
-  IndianRupee, Building2,
+  IndianRupee, Building2, AlertCircle,
 } from 'lucide-react'
 import { formatINR, formatDate } from '@/lib/shipledger'
 
@@ -634,64 +634,61 @@ function DropZone({ icon: Icon, title, sub }: { icon: React.ComponentType<{ clas
 }
 
 function EngineStep({ contractId, onBack, onComplete }: { contractId: string | null; onBack: () => void; onComplete: () => void }) {
-  const [running, setRunning] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [stage, setStage] = useState('')
-
-  const run = async () => {
-    setRunning(true)
-    const stages = [
-      { p: 18, s: 'Blocking: filter candidates by date range + keyword/embedding overlap' },
-      { p: 36, s: 'Scoring: semantic_similarity × 0.5 + explicit_reference × 1.0 + temporal_proximity × 0.2 + actor_match × 0.1' },
-      { p: 54, s: 'Auto-linking above CONFIDENT_THRESHOLD (0.85); queueing for human review above 0.55' },
-      { p: 72, s: 'Running deterministic gap-detection rules: missed_milestone, unbilled_overage, scope_creep_language' },
-      { p: 88, s: 'Computing decomposed confidence scores — contract clarity, delivery-evidence strength, authorization presence, billing-gap certainty' },
-      { p: 100, s: 'Queueing findings for human review — the product proposes, never asserts' },
-    ]
-    for (const st of stages) {
-      await new Promise(r => setTimeout(r, 500))
-      setProgress(st.p)
-      setStage(st.s)
-    }
-    setTimeout(() => {
-      setRunning(false)
-      onComplete()
-    }, 400)
-  }
-
+  // Previously this step faked a multi-stage forensic-engine progress bar
+  // with `setTimeout(r, 500)` per stage and copy that read like a real
+  // pipeline ("Blocking: filter candidates by date range + keyword/embedding
+  // overlap", "Scoring: semantic_similarity × 0.5 + ..."). That was
+  // misleading — the actual engine (§9.1 entity resolution + §9.3 rules
+  // engine) is not implemented yet. The honest version below shows what
+  // WAS done (LLM contract extraction persisted in step 3) and what's NOT
+  // done yet (cross-system entity resolution, deterministic gap rules).
   return (
     <div>
-      <h3 className="text-sm font-medium">5. Run the forensic engine</h3>
+      <h3 className="text-sm font-medium">5. Contract extraction complete</h3>
       <p className="text-xs text-muted-foreground mt-1">
-        This is the core. Entity resolution across systems, deterministic rules where the call is near-certain,
-        LLM judgment reserved for ambiguous calls (always routed to human review).
+        The SOW text was passed through the LLM extraction pipeline and a structured contract record
+        {contractId ? ' was persisted' : ' was returned (not persisted)'}.
       </p>
 
-      <div className="mt-4 p-4 rounded border border-border bg-muted/30">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Pipeline progress</div>
-        <div className="h-2 rounded-full bg-muted overflow-hidden">
-          <div
-            className="h-full bg-primary rounded-full transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
+      <div className="mt-4 p-4 rounded border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/20">
+        <div className="flex items-start gap-2">
+          <CheckCircle2 className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-300" />
+          <div className="text-xs">
+            <div className="font-medium text-emerald-900 dark:text-emerald-200">Contract extraction</div>
+            <div className="text-emerald-700 dark:text-emerald-300 mt-0.5">
+              Line items, milestones, and exclusions were parsed from the SOW and stored.
+              {contractId && <span className="font-mono text-[10px]"> ref: {contractId.slice(-8)}</span>}
+            </div>
+          </div>
         </div>
-        <p className="mt-2 text-xs text-muted-foreground leading-relaxed min-h-[2.5rem]">
-          {stage || 'Ready. Click "Run forensic engine" to start the reconciliation.'}
-        </p>
+      </div>
+
+      <div className="mt-3 p-4 rounded border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/20">
+        <div className="flex items-start gap-2">
+          <AlertCircle className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-300" />
+          <div className="text-xs">
+            <div className="font-medium text-amber-900 dark:text-amber-200">Forensic reconciliation — roadmap</div>
+            <div className="text-amber-700 dark:text-amber-300 mt-0.5">
+              The full forensic engine (§9.1 entity resolution across GitHub / Jira / invoices + §9.3 deterministic
+              gap-detection rules + §9.4 decomposed confidence scoring) is on the roadmap. For this demo, no
+              findings are auto-generated from the extracted contract — see the review queue for pre-seeded
+              examples of what those findings will look like.
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="mt-5 flex justify-between">
-        <Button variant="outline" onClick={onBack} disabled={running}>
+        <Button variant="outline" onClick={onBack}>
           <ArrowLeft className="h-3.5 w-3.5 mr-1" />
           Back
         </Button>
         <Button
-          onClick={run}
-          disabled={running || !contractId}
+          onClick={onComplete}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
-          {running ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
-          {running ? 'Running…' : 'Run forensic engine'}
+          View review queue
+          <ArrowRight className="h-3.5 w-3.5 ml-1" />
         </Button>
       </div>
     </div>

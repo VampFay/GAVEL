@@ -1,9 +1,6 @@
-import { clsx, type ClassValue } from 'clsx'
-import { twMerge } from 'tailwind-merge'
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
+// `cn` lives in `src/lib/utils.ts` and is re-exported here for backwards
+// compatibility with components that import everything from this module.
+export { cn } from './utils'
 
 export function formatINR(n: number | null | undefined): string {
   if (n == null || !isFinite(n)) return '—'

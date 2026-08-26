@@ -1,6 +1,9 @@
 // ShipLedger — Prisma schema
 // Forensic delivery-to-billing reconciliation tool for dev/IT services firms.
 
+// NOTE: provider is sqlite for the dev sandbox. Production should switch to
+// postgresql + pgvector per §8 of the product plan. The Decimal type below
+// works on SQLite (stored as TEXT) and on Postgres (stored as NUMERIC).
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,45 +14,85 @@ datasource db {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tenancy & core organizational entities
+// Identity & tenancy (schema scaffolding — wire Clerk/Auth0 next)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  email     String   @unique
+  name      String?
+  role      String   @default("viewer") // viewer|reviewer|admin
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant        Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  reviewedFindings Finding[] @relation("ReviewerFindings")
+  acknowledgedAlerts Alert[]  @relation("AcknowledgerAlerts")
+  auditLogs    AuditLog[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core organizational entities
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Client {
-  id           String     @id @default(cuid())
+  id           String    @id @default(cuid())
   name         String
   industry     String?
-  sizeBand     String?    // e.g. "10-50"
+  sizeBand     String?   // e.g. "10-50"
   contactName  String?
-  contactEmail String?
+  contactEmail String?   @unique
   logoUrl      String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime? // soft-delete
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   contracts    Contract[]
   projects     Project[]
   invoices     Invoice[]
+
+  @@index([name])
+  @@index([deletedAt])
 }
 
 model Contract {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   clientId        String
   title           String
-  effectiveDate    DateTime
+  effectiveDate   DateTime
   endDate         DateTime?
-  currency        String   @default("INR")
-  totalValue      Float?
-  rawText         String?  // original SOW text
-  status          String   @default("active") // draft|active|expired|terminated
-  extractedJson   String?  // LLM-extracted structured payload (JSON string)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  currency        String    @default("INR")
+  totalValue      Float?    // TODO: Decimal after Postgres migration
+  rawText         String?   // original SOW text
+  status          String    @default("active") // draft|active|expired|terminated
+  extractedJson   String?   // LLM-extracted structured payload (JSON string)
+  deletedAt       DateTime? // soft-delete
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   client          Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   lineItems       LineItem[]
   changeOrders    ChangeOrder[]
+  milestones      Milestone[]
+  exclusions      Exclusion[]
   projects        Project[]
   findings        Finding[]
   invoices        Invoice[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([deletedAt])
 }
 
 model ChangeOrder {
@@ -63,10 +106,12 @@ model ChangeOrder {
   updatedAt    DateTime @updatedAt
 
   contract     Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
 }
 
 model LineItem {
-  id           String  @id @default(cuid())
+  id           String   @id @default(cuid())
   contractId   String
   description  String
   rate         Float?
@@ -75,8 +120,42 @@ model LineItem {
   milestone    String?
   deliveryDate DateTime?
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   contract     Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@index([milestone])
+}
+
+model Milestone {
+  id          String   @id @default(cuid())
+  contractId  String
+  externalId  String?  // e.g. "M1"
+  description String
+  dueDate     DateTime?
+  value       Float?
+  currency    String   @default("INR")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@unique([contractId, externalId])
+}
+
+model Exclusion {
+  id          String   @id @default(cuid())
+  contractId  String
+  clause      String?  // e.g. "5.1"
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,38 +163,52 @@ model LineItem {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Project {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   clientId    String
   contractId  String?
   name        String
-  status      String   @default("active") // active|completed|on_hold
+  status      String    @default("active") // active|completed|on_hold
   startDate   DateTime?
   endDate     DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime? // soft-delete
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  contract    Contract?    @relation(fields: [contractId], references: [id])
+  contract    Contract?   @relation(fields: [contractId], references: [id], onDelete: SetNull)
   tickets     Ticket[]
   codeActivities CodeActivity[]
+  timeEntries  TimeEntry[]
   findings    Finding[]
   monitored   MonitoredProject?
+
+  @@index([clientId])
+  @@index([contractId])
+  @@index([status])
+  @@index([deletedAt])
 }
 
 model Ticket {
-  id          String   @id @default(cuid())
-  projectId   String
-  externalId  String   // e.g. ENG-204
-  title       String
-  type        String? // story|bug|task|epic
-  status      String  // todo|in_progress|done|closed
-  assignee    String?
-  created     DateTime
-  updated     DateTime
-  description String?
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  projectId    String
+  externalId   String   // e.g. ENG-204
+  title        String
+  type         String?  // story|bug|task|epic
+  status       String   // todo|in_progress|done|closed
+  assignee     String?
+  // NOTE: `externalCreated`/`externalUpdated` mirror the upstream system's
+  // timestamps; `createdAt`/`updatedAt` are Prisma's own. The previous
+  // collision (`created`/`updated` + `createdAt`) is gone.
+  externalCreated DateTime?
+  externalUpdated DateTime?
+  description  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@unique([projectId, externalId])
 }
 
 model CodeActivity {
@@ -131,8 +224,30 @@ model CodeActivity {
   filesChanged Int?
   url         String?
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, timestamp])
+}
+
+model TimeEntry {
+  id          String   @id @default(cuid())
+  projectId   String
+  externalId  String?  // upstream id from Toggl/Harvest/etc.
+  assignee    String?
+  description String?
+  hours       Float?
+  loggedAt    DateTime
+  source      String?  // toggl|harvest|jira|manual
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, loggedAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,21 +255,29 @@ model CodeActivity {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Invoice {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   clientId     String
   contractId   String?
   number       String
   issueDate    DateTime
   dueDate      DateTime?
-  status       String   @default("issued") // draft|issued|paid|overdue|void
+  status       String    @default("issued") // draft|issued|paid|overdue|void
   total        Float
-  currency     String   @default("INR")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  currency     String    @default("INR")
+  deletedAt    DateTime? // soft-delete
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  contract     Contract?    @relation(fields: [contractId], references: [id])
+  contract     Contract?    @relation(fields: [contractId], references: [id], onDelete: SetNull)
   lines        InvoiceLine[]
+  payments     Payment[]
+
+  @@index([clientId])
+  @@index([contractId])
+  @@index([status])
+  @@index([number])
+  @@index([deletedAt])
 }
 
 model InvoiceLine {
@@ -165,8 +288,28 @@ model InvoiceLine {
   periodStart  DateTime?
   periodEnd    DateTime?
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   invoice      Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  amount      Float
+  currency    String   @default("INR")
+  paidAt      DateTime
+  method      String?  // bank_transfer|card|cheque|upi
+  reference   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([paidAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,32 +317,39 @@ model InvoiceLine {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Finding {
-  id              String   @id @default(cuid())
+  id              String    @id @default(cuid())
   contractId      String?
   projectId       String?
-  type            String   // missed_milestone|unbilled_overage|scope_expansion|rate_discrepancy|unauthorized_work
+  type            String    // missed_milestone|unbilled_overage|scope_expansion|rate_discrepancy|unauthorized_work
   title           String
   summary         String
-  impactAmount     Float?   // INR value at stake
-  confidence      String   // HIGH|MEDIUM|LOW
-  confidenceScore Float?   // 0.0-1.0 composite
-  assessment      String   // billable|already_covered|ambiguous
-  recommendedAction String // approve|dismiss|request_review|draft_change_order
-  status          String   @default("pending_review") // pending_review|approved|dismissed|escalated
+  impactAmount    Float?    // INR value at stake
+  confidence      String    // HIGH|MEDIUM|LOW
+  confidenceScore Float?    // 0.0-1.0 composite
+  assessment      String    // billable|already_covered|ambiguous
+  recommendedAction String  // approve|dismiss|request_review|draft_change_order
+  status          String    @default("pending_review") // pending_review|approved|dismissed|escalated
   contractClause  String?
   billingState    String?
   reviewNotes     String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime? // soft-delete
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   reviewedAt      DateTime?
-  reviewedBy      String?
+  reviewedById    String?   // FK to User (was: reviewedBy String?)
 
-  contract        Contract?  @relation(fields: [contractId], references: [id])
-  project         Project?   @relation(fields: [projectId], references: [id])
+  contract        Contract?  @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  project         Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  reviewer        User?      @relation("ReviewerFindings", fields: [reviewedById], references: [id], onDelete: SetNull)
   evidence        FindingEvidence[]
 
   @@index([status])
   @@index([type])
+  @@index([contractId])
+  @@index([projectId])
+  @@index([reviewedById])
+  @@index([createdAt])
+  @@index([deletedAt])
 }
 
 model FindingEvidence {
@@ -213,8 +363,12 @@ model FindingEvidence {
   timestamp    DateTime?
   weight       Float?   // contribution to confidence score
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   finding      Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([findingId])
+  @@index([source])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,6 +383,23 @@ model MonitoredProject {
   driftBaseline Float?  // expected delivery-to-billing ratio
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   alerts      Alert[]
+  driftSnapshots WeeklyDriftSnapshot[]
+}
+
+model WeeklyDriftSnapshot {
+  id              String   @id @default(cuid())
+  monitoredProjectId String
+  weekStart       DateTime
+  deliveryHours   Float
+  billedHours     Float
+  ratio           Float
+  zScore          Float?
+  createdAt       DateTime @default(now())
+
+  monitoredProject MonitoredProject @relation(fields: [monitoredProjectId], references: [id], onDelete: Cascade)
+
+  @@unique([monitoredProjectId, weekStart])
+  @@index([monitoredProjectId, weekStart])
 }
 
 model Alert {
@@ -237,25 +408,42 @@ model Alert {
   severity    String   // info|warning|critical
   category    String   // scope_creep|milestone_gap|billing_drift|rate_risk
   message     String
-  createdAt   DateTime @default(now())
   acknowledged Boolean @default(false)
+  acknowledgedAt DateTime?
+  acknowledgedById String?  // FK to User
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   monitoredProject MonitoredProject @relation(fields: [monitoredProjectId], references: [id], onDelete: Cascade)
+  acknowledger     User?            @relation("AcknowledgerAlerts", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+
+  @@index([monitoredProjectId])
+  @@index([createdAt])
+  @@index([acknowledged])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Immutable audit log — every access, review, export, finding action
+// Immutable audit log — every access, review, export, finding action.
+// Immutability is enforced at the Prisma-client layer via an `extends`
+// client extension in src/lib/db.ts (blocks update/delete on this model).
 // ─────────────────────────────────────────────────────────────────────────────
 
 model AuditLog {
   id          String   @id @default(cuid())
-  actor       String
+  actorId     String?  // FK to User (null = unauthenticated/system)
+  actor       String   // email string (kept for backward compat; prefer actorId)
   action      String   // view|review|approve|dismiss|escalate|export|extract|seed
   entityType  String?
   entityId    String?
   detail      String?
+  requestId   String?  // correlation id from middleware
   createdAt   DateTime @default(now())
+
+  actorUser   User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([actor])
   @@index([action])
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@index([requestId])
 }

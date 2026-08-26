@@ -8,44 +8,47 @@ const __dirname = dirname(__filename);
 
 const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
   rules: {
-    // TypeScript rules
-    "@typescript-eslint/no-explicit-any": "off",
-    "@typescript-eslint/no-unused-vars": "off",
-    "@typescript-eslint/no-non-null-assertion": "off",
-    "@typescript-eslint/ban-ts-comment": "off",
+    // TypeScript rules — warn (not error) so the build doesn't break, but
+    // the lint script surfaces real issues.
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+    "@typescript-eslint/no-non-null-assertion": "warn",
+    "@typescript-eslint/ban-ts-comment": "warn",
     "@typescript-eslint/prefer-as-const": "off",
-    "@typescript-eslint/no-unused-disable-directive": "off",
-    
+
     // React rules
-    "react-hooks/exhaustive-deps": "off",
-    "react-hooks/purity": "off",
-    "react-hooks/set-state-in-effect": "off",
-    "react/no-unescaped-entities": "off",
+    "react-hooks/exhaustive-deps": "warn",
+    "react-hooks/purity": "warn",
+    "react-hooks/set-state-in-effect": "off", // too noisy for the `useEffect(() => setMounted(true), [])` pattern
+    "react/no-unescaped-entities": "warn",
     "react/display-name": "off",
     "react/prop-types": "off",
     "react-compiler/react-compiler": "off",
-    
+
     // Next.js rules
-    "@next/next/no-img-element": "off",
+    "@next/next/no-img-element": "warn",
     "@next/next/no-html-link-for-pages": "off",
-    
+
     // General JavaScript rules
-    "prefer-const": "off",
-    "no-unused-vars": "off",
-    "no-console": "off",
-    "no-debugger": "off",
-    "no-empty": "off",
-    "no-irregular-whitespace": "off",
-    "no-case-declarations": "off",
-    "no-fallthrough": "off",
-    "no-mixed-spaces-and-tabs": "off",
-    "no-redeclare": "off",
+    "prefer-const": "error",
+    "no-unused-vars": "off", // handled by @typescript-eslint/no-unused-vars
+    "no-console": ["warn", { allow: ["warn", "error"] }],
+    "no-debugger": "error",
+    "no-empty": "warn",
+    "no-irregular-whitespace": "error",
+    "no-case-declarations": "warn",
+    "no-fallthrough": "error",
+    "no-mixed-spaces-and-tabs": "error",
+    "no-redeclare": "error",
+    // NOTE: `no-undef` is disabled for TS files — TypeScript handles undefined-symbol
+    // checking via `noImplicitAny` and module resolution. `no-undef` was flagging
+    // `React`, `ResponseInit`, and other DOM/Node globals.
     "no-undef": "off",
-    "no-unreachable": "off",
-    "no-useless-escape": "off",
+    "no-unreachable": "error",
+    "no-useless-escape": "warn",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills"]
+  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "skills"]
 }];
 
 export default eslintConfig;

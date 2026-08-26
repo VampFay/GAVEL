@@ -21,8 +21,8 @@ export async function GET(
           invoices: { include: { lines: true } },
           projects: {
             include: {
-              tickets: { orderBy: { updated: 'desc' } },
-              codeActivities: { orderBy: { timestamp: 'desc' } },
+              tickets: { orderBy: { externalUpdated: 'desc' }, take: 100 },
+              codeActivities: { orderBy: { timestamp: 'desc' }, take: 100 },
               monitored: true,
             },
           },
@@ -45,8 +45,9 @@ export async function GET(
       name: client.name,
       industry: client.industry,
       sizeBand: client.sizeBand,
-      contactName: client.contactName,
-      contactEmail: client.contactEmail,
+      // NOTE: contactName + contactEmail intentionally omitted pending
+      // auth wiring (PII exposure — see audit P0/P1). Re-add behind a
+      // reviewer/admin role check when next-auth is configured.
     },
     contract: {
       id: contract.id,

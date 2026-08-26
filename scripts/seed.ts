@@ -6,21 +6,30 @@ import { db } from '../src/lib/db'
 async function main() {
   console.log('Seeding ShipLedger demo data...')
 
-  // Clean slate
+  // Clean slate — order respects FK dependencies. Includes new tables
+  // added during the schema-hardening pass (Milestone, Exclusion, TimeEntry,
+  // Payment, WeeklyDriftSnapshot, User, Tenant).
+  await db.weeklyDriftSnapshot.deleteMany()
   await db.auditLog.deleteMany()
   await db.alert.deleteMany()
   await db.monitoredProject.deleteMany()
+  await db.payment.deleteMany()
   await db.findingEvidence.deleteMany()
   await db.finding.deleteMany()
   await db.invoiceLine.deleteMany()
   await db.invoice.deleteMany()
+  await db.timeEntry.deleteMany()
   await db.codeActivity.deleteMany()
   await db.ticket.deleteMany()
+  await db.exclusion.deleteMany()
+  await db.milestone.deleteMany()
   await db.lineItem.deleteMany()
   await db.changeOrder.deleteMany()
   await db.project.deleteMany()
   await db.contract.deleteMany()
   await db.client.deleteMany()
+  await db.user.deleteMany()
+  await db.tenant.deleteMany()
 
   // ─────────────────────────── CLIENT ───────────────────────────
   const client = await db.client.create({
@@ -110,20 +119,21 @@ Currency: INR
     },
   })
 
-  // Tickets (Jira-like)
+  // Tickets (Jira-like) — uses renamed externalCreated/externalUpdated
+  // (the previous `created`/`updated` collided with Prisma's own timestamps).
   const tickets = [
-    { externalId: 'ENG-101', title: 'OAuth2 IdP integration scaffold', type: 'story', status: 'done', assignee: 'Aisha K.', created: new Date('2025-03-02'), updated: new Date('2025-03-20') },
-    { externalId: 'ENG-104', title: 'Hospital IdP token refresh flow', type: 'story', status: 'done', assignee: 'Aisha K.', created: new Date('2025-03-05'), updated: new Date('2025-03-25') },
-    { externalId: 'ENG-110', title: 'Appointment booking UI — calendar grid', type: 'story', status: 'done', assignee: 'Dev R.', created: new Date('2025-03-15'), updated: new Date('2025-04-18') },
-    { externalId: 'ENG-118', title: 'Pharmacy order history API', type: 'story', status: 'done', assignee: 'Dev R.', created: new Date('2025-03-22'), updated: new Date('2025-04-26') },
-    { externalId: 'ENG-122', title: 'Lab results PDF renderer', type: 'story', status: 'done', assignee: 'Meera S.', created: new Date('2025-04-12'), updated: new Date('2025-05-22') },
-    { externalId: 'ENG-131', title: 'Telemedicine WebRTC SDK integration', type: 'story', status: 'done', assignee: 'Aisha K.', created: new Date('2025-05-02'), updated: new Date('2025-06-14') },
-    { externalId: 'ENG-140', title: 'Patient push notification preferences', type: 'story', status: 'done', assignee: 'Dev R.', created: new Date('2025-05-10'), updated: new Date('2025-06-05') },
-    { externalId: 'ENG-145', title: 'Audit log streaming to Splunk', type: 'task', status: 'done', assignee: 'Meera S.', created: new Date('2025-05-18'), updated: new Date('2025-06-08') },
-    { externalId: 'ENG-149', title: 'Backend EMR customization — prescription endpoint', type: 'task', status: 'done', assignee: 'Aisha K.', created: new Date('2025-05-22'), updated: new Date('2025-06-12') },
-    { externalId: 'ENG-152', title: 'Kubernetes ingress hardening', type: 'task', status: 'done', assignee: 'Dev R.', created: new Date('2025-05-28'), updated: new Date('2025-06-10') },
-    { externalId: 'ENG-155', title: 'Legacy record migration beyond 50k cap', type: 'task', status: 'done', assignee: 'Meera S.', created: new Date('2025-06-01'), updated: new Date('2025-06-25') },
-    { externalId: 'ENG-158', title: 'WCAG 2.1 AA accessibility audit & remediation', type: 'task', status: 'done', assignee: 'Dev R.', created: new Date('2025-06-05'), updated: new Date('2025-06-22') },
+    { externalId: 'ENG-101', title: 'OAuth2 IdP integration scaffold', type: 'story', status: 'done', assignee: 'Aisha K.', externalCreated: new Date('2025-03-02'), externalUpdated: new Date('2025-03-20') },
+    { externalId: 'ENG-104', title: 'Hospital IdP token refresh flow', type: 'story', status: 'done', assignee: 'Aisha K.', externalCreated: new Date('2025-03-05'), externalUpdated: new Date('2025-03-25') },
+    { externalId: 'ENG-110', title: 'Appointment booking UI — calendar grid', type: 'story', status: 'done', assignee: 'Dev R.', externalCreated: new Date('2025-03-15'), externalUpdated: new Date('2025-04-18') },
+    { externalId: 'ENG-118', title: 'Pharmacy order history API', type: 'story', status: 'done', assignee: 'Dev R.', externalCreated: new Date('2025-03-22'), externalUpdated: new Date('2025-04-26') },
+    { externalId: 'ENG-122', title: 'Lab results PDF renderer', type: 'story', status: 'done', assignee: 'Meera S.', externalCreated: new Date('2025-04-12'), externalUpdated: new Date('2025-05-22') },
+    { externalId: 'ENG-131', title: 'Telemedicine WebRTC SDK integration', type: 'story', status: 'done', assignee: 'Aisha K.', externalCreated: new Date('2025-05-02'), externalUpdated: new Date('2025-06-14') },
+    { externalId: 'ENG-140', title: 'Patient push notification preferences', type: 'story', status: 'done', assignee: 'Dev R.', externalCreated: new Date('2025-05-10'), externalUpdated: new Date('2025-06-05') },
+    { externalId: 'ENG-145', title: 'Audit log streaming to Splunk', type: 'task', status: 'done', assignee: 'Meera S.', externalCreated: new Date('2025-05-18'), externalUpdated: new Date('2025-06-08') },
+    { externalId: 'ENG-149', title: 'Backend EMR customization — prescription endpoint', type: 'task', status: 'done', assignee: 'Aisha K.', externalCreated: new Date('2025-05-22'), externalUpdated: new Date('2025-06-12') },
+    { externalId: 'ENG-152', title: 'Kubernetes ingress hardening', type: 'task', status: 'done', assignee: 'Dev R.', externalCreated: new Date('2025-05-28'), externalUpdated: new Date('2025-06-10') },
+    { externalId: 'ENG-155', title: 'Legacy record migration beyond 50k cap', type: 'task', status: 'done', assignee: 'Meera S.', externalCreated: new Date('2025-06-01'), externalUpdated: new Date('2025-06-25') },
+    { externalId: 'ENG-158', title: 'WCAG 2.1 AA accessibility audit & remediation', type: 'task', status: 'done', assignee: 'Dev R.', externalCreated: new Date('2025-06-05'), externalUpdated: new Date('2025-06-22') },
   ]
   for (const t of tickets) {
     await db.ticket.create({ data: { projectId: project.id, ...t, description: '' } })
@@ -145,6 +155,29 @@ Currency: INR
   ]
   for (const c of commits) {
     await db.codeActivity.create({ data: { projectId: project.id, ...c } })
+  }
+
+  // ─────────────────────── MILESTONES & EXCLUSIONS ─────────────────
+  // Persisted as proper rows now (previously only in rawText). This lets
+  // the §9.3 rules engine actually query milestones/exclusions instead
+  // of regexing the SOW every time.
+  const milestoneRows = [
+    { externalId: 'M1', description: 'Auth & SSO complete', dueDate: new Date('2025-03-31'), value: 600000, currency: 'INR' },
+    { externalId: 'M2', description: 'Booking flow + pharmacy module', dueDate: new Date('2025-04-30'), value: 950000, currency: 'INR' },
+    { externalId: 'M3', description: 'Lab results viewer', dueDate: new Date('2025-05-25'), value: 550000, currency: 'INR' },
+    { externalId: 'M4', description: 'Telemedicine integration', dueDate: new Date('2025-06-15'), value: 700000, currency: 'INR' },
+    { externalId: 'M5', description: 'Data migration + UAT', dueDate: new Date('2025-06-30'), value: 400000, currency: 'INR' },
+  ]
+  for (const m of milestoneRows) {
+    await db.milestone.create({ data: { contractId: contract.id, ...m } })
+  }
+  const exclusionRows = [
+    { clause: '5.1', description: 'Backend hospital EMR customization is NOT in scope.' },
+    { clause: '5.2', description: 'Infrastructure / DevOps work billed separately.' },
+    { clause: '5.3', description: 'Content migration beyond record count above is out of scope.' },
+  ]
+  for (const e of exclusionRows) {
+    await db.exclusion.create({ data: { contractId: contract.id, ...e } })
   }
 
   // ─────────────────────────── INVOICES ──────────────────────────

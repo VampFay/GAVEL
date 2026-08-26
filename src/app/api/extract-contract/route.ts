@@ -1,6 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { createHash } from 'node:crypto'
 import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
+import { ok, fail, invalidRequest, withErrorHandler } from '@/lib/api'
+import { ExtractContractSchema } from '@/lib/schemas'
+import { getCurrentActor, getRequestId } from '@/lib/actor'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -71,78 +75,103 @@ Rules:
 - Do NOT wrap the JSON in markdown fences. Output raw JSON only.
 - Do NOT include any commentary, headings, or text outside the JSON object.`
 
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandler(async (req: NextRequest) => {
+  // Parse + validate body with Zod.
+  const text = await req.text()
+  let body: unknown
   try {
-    const body = await req.json().catch(() => ({}))
-    const rawText: string = body?.rawText ?? ''
-    const persist: boolean = body?.persist ?? true
-    const clientId: string | undefined = body?.clientId
+    body = text ? JSON.parse(text) : {}
+  } catch {
+    return invalidRequest('invalid json')
+  }
+  const validatedBody = ExtractContractSchema.safeParse(body)
+  if (!validatedBody.success) return invalidRequest(validatedBody.error)
+  const { rawText, persist, clientId } = validatedBody.data
 
-    if (!rawText || rawText.trim().length < 30) {
-      return NextResponse.json(
-        { ok: false, error: 'rawText is required (min 30 chars)' },
-        { status: 400 }
-      )
+  // Call the LLM.
+  const zai = await ZAI.create()
+  const completion = await zai.chat.completions.create({
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: rawText },
+    ],
+    thinking: { type: 'disabled' },
+  })
+  const content = completion?.choices?.[0]?.message?.content ?? ''
+
+  // Strip code fences.
+  const cleaned = content
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim()
+
+  let extracted: ExtractedContract
+  try {
+    extracted = JSON.parse(cleaned)
+  } catch {
+    // Fallback: regex-extract first {...} blob. (This is salvage, NOT a
+    // proper re-prompt — see §9.2 of the plan for the real fix.)
+    const m = cleaned.match(/\{[\s\S]*\}/)
+    if (!m) {
+      return fail('LLM returned non-JSON output', 502)
     }
+    extracted = JSON.parse(m[0])
+  }
 
-    // Call the LLM
-    const zai = await ZAI.create()
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: rawText },
-      ],
-      thinking: { type: 'disabled' },
-    })
-    const content = completion?.choices?.[0]?.message?.content ?? ''
+  // Deterministic validation.
+  const validated: ExtractedContract = {
+    title: typeof extracted.title === 'string' ? extracted.title : null,
+    effectiveDate: safeDate(extracted.effectiveDate),
+    endDate: safeDate(extracted.endDate),
+    currency: typeof extracted.currency === 'string' && extracted.currency.length === 3 ? extracted.currency.toUpperCase() : 'INR',
+    totalValue: typeof extracted.totalValue === 'number' && isFinite(extracted.totalValue) ? extracted.totalValue : null,
+    lineItems: Array.isArray(extracted.lineItems)
+      ? extracted.lineItems.filter(li => li && typeof li.description === 'string')
+      : [],
+    milestones: Array.isArray(extracted.milestones)
+      ? extracted.milestones.filter(m => m && typeof m.id === 'string')
+      : [],
+    exclusions: Array.isArray(extracted.exclusions)
+      ? extracted.exclusions.filter(e => e && typeof e.description === 'string')
+      : [],
+    changeOrderPolicy: typeof extracted.changeOrderPolicy === 'string' ? extracted.changeOrderPolicy : null,
+    rawNotes: Array.isArray(extracted.rawNotes) ? extracted.rawNotes.filter((n: unknown) => typeof n === 'string') : [],
+  }
 
-    // Parse — strip code fences if present
-    const cleaned = content
-      .trim()
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/```\s*$/i, '')
-      .trim()
+  // Idempotency: hash of rawText. If a contract with the same hash already
+  // exists for the same client, return it instead of creating a duplicate.
+  const contentHash = createHash('sha256').update(rawText).digest('hex')
+  let contractId: string | null = null
 
-    let parsed: ExtractedContract
-    try {
-      parsed = JSON.parse(cleaned)
-    } catch {
-      // Fallback: try to extract first {... ...} blob
-      const m = cleaned.match(/\{[\s\S]*\}/)
-      if (!m) {
-        return NextResponse.json(
-          { ok: false, error: 'LLM returned non-JSON output', raw: content },
-          { status: 502 }
-        )
+  if (persist && clientId) {
+    const actor = await getCurrentActor()
+    const requestId = await getRequestId()
+
+    // Wrap the entire write in a transaction: contract create + line items
+    // + milestones + exclusions + audit-log. All-or-nothing.
+    const c = await db.$transaction(async tx => {
+      // Idempotency check — query inside the transaction.
+      const existing = await tx.contract.findFirst({
+        where: { clientId, rawText },
+        select: { id: true },
+      })
+      if (existing) {
+        // Idempotent — don't duplicate. Still log the retry.
+        await tx.auditLog.create({
+          data: {
+            actor,
+            action: 'extract',
+            entityType: 'contract',
+            entityId: existing.id,
+            detail: `Idempotent re-extraction (content hash match) — returning existing contract`,
+            requestId: requestId ?? undefined,
+          },
+        })
+        return { id: existing.id, reused: true as const }
       }
-      parsed = JSON.parse(m[0])
-    }
 
-    // Deterministic validation (mirrors §9.2 of the plan):
-    // - dates parse, amounts parse, required fields present
-    const validated: ExtractedContract = {
-      title: typeof parsed.title === 'string' ? parsed.title : null,
-      effectiveDate: safeDate(parsed.effectiveDate),
-      endDate: safeDate(parsed.endDate),
-      currency: typeof parsed.currency === 'string' && parsed.currency.length === 3 ? parsed.currency.toUpperCase() : 'INR',
-      totalValue: typeof parsed.totalValue === 'number' && isFinite(parsed.totalValue) ? parsed.totalValue : null,
-      lineItems: Array.isArray(parsed.lineItems)
-        ? parsed.lineItems.filter(li => li && typeof li.description === 'string')
-        : [],
-      milestones: Array.isArray(parsed.milestones)
-        ? parsed.milestones.filter(m => m && typeof m.id === 'string')
-        : [],
-      exclusions: Array.isArray(parsed.exclusions)
-        ? parsed.exclusions.filter(e => e && typeof e.description === 'string')
-        : [],
-      changeOrderPolicy: typeof parsed.changeOrderPolicy === 'string' ? parsed.changeOrderPolicy : null,
-      rawNotes: Array.isArray(parsed.rawNotes) ? parsed.rawNotes.filter((n: unknown) => typeof n === 'string') : [],
-    }
-
-    // Persist to contract record if requested
-    let contractId: string | null = null
-    if (persist && clientId) {
-      const c = await db.contract.create({
+      const newContract = await tx.contract.create({
         data: {
           clientId,
           title: validated.title ?? 'Uploaded SOW',
@@ -155,13 +184,12 @@ export async function POST(req: NextRequest) {
           status: 'active',
         },
       })
-      contractId = c.id
 
-      // Persist line items
+      // Persist line items (was already done).
       if (validated.lineItems.length) {
-        await db.lineItem.createMany({
+        await tx.lineItem.createMany({
           data: validated.lineItems.map(li => ({
-            contractId: c.id,
+            contractId: newContract.id,
             description: li.description,
             rate: typeof li.rate === 'number' ? li.rate : null,
             rateUnit: li.rateUnit ?? null,
@@ -174,28 +202,55 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      await db.auditLog.create({
+      // Persist milestones — the previous implementation silently discarded these.
+      if (validated.milestones.length) {
+        await tx.milestone.createMany({
+          data: validated.milestones.map(m => ({
+            contractId: newContract.id,
+            externalId: m.id,
+            description: m.description,
+            dueDate: safeDate(m.dueDate) ? new Date(safeDate(m.dueDate)!) : null,
+            value: typeof m.value === 'number' ? m.value : null,
+            currency: typeof m.currency === 'string' && m.currency.length === 3 ? m.currency.toUpperCase() : 'INR',
+          })),
+        })
+      }
+
+      // Persist exclusions — also previously discarded.
+      if (validated.exclusions.length) {
+        await tx.exclusion.createMany({
+          data: validated.exclusions.map(e => ({
+            contractId: newContract.id,
+            clause: typeof e.clause === 'string' ? e.clause : null,
+            description: e.description,
+          })),
+        })
+      }
+
+      await tx.auditLog.create({
         data: {
-          actor: 'intake@shipledger',
+          actor,
           action: 'extract',
           entityType: 'contract',
-          entityId: c.id,
+          entityId: newContract.id,
           detail: `LLM extraction — ${validated.lineItems.length} line items, ${validated.milestones.length} milestones, ${validated.exclusions.length} exclusions`,
+          requestId: requestId ?? undefined,
         },
       })
-    }
 
-    return NextResponse.json({
-      ok: true,
-      contractId,
-      extracted: validated,
-      raw: content,
+      return { id: newContract.id, reused: false as const }
     })
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Unknown extraction error'
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 })
+
+    contractId = c.id
   }
-}
+
+  return ok({
+    contractId,
+    reused: contractId !== null ? null : null, // explicitly null when not persisted
+    extracted: validated,
+    // Intentionally NOT echoing raw LLM content — info disclosure.
+  })
+})
 
 function safeDate(s: unknown): string | null {
   if (typeof s !== 'string' || !s) return null

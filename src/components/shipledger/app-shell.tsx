@@ -49,13 +49,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             className="md:hidden inline-flex items-center justify-center rounded-md p-2 hover:bg-muted"
             onClick={() => setMobileOpen(true)}
             aria-label="Open menu"
+            aria-expanded={mobileOpen}
           >
             <Menu className="h-5 w-5" />
           </button>
           <button onClick={() => setView('landing')} className="cursor-pointer" aria-label="Go to home">
             <Logo />
           </button>
-          <nav className="ml-6 hidden md:flex items-center gap-1">
+          <nav className="ml-6 hidden md:flex items-center gap-1" aria-label="Primary">
             {NAV.map(item => {
               const Icon = item.icon
               const active = view === item.view || (item.view === 'audits' && (view === 'audit_detail' || view === 'finding_detail'))
@@ -64,6 +65,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={item.view}
                   onClick={() => setView(item.view)}
                   title={item.description}
+                  aria-current={active ? 'page' : undefined}
                   className={cn(
                     'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors',
                     active
@@ -78,7 +80,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
           <div className="ml-auto flex items-center gap-2">
-            <ReSeedButton />
+            {process.env.NODE_ENV !== 'production' && <ReSeedButton />}
             <ThemeToggle />
             <Button
               size="sm"

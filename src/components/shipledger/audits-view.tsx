@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useAppStore } from '@/stores/app-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,15 +14,19 @@ import {
   Activity,
   Building2,
   Plus,
+  AlertCircle,
+  RotateCw,
 } from 'lucide-react'
-import { formatINR, formatINRCompact, formatDate, formatINRCompact as fmt } from '@/lib/shipledger'
+import { toast } from 'sonner'
+import { formatINR, formatINRCompact, formatDate } from '@/lib/shipledger'
+import { apiGet } from '@/lib/fetch'
 
 interface Audit {
   clientId: string
   clientName: string
   industry: string | null
   sizeBand: string | null
-  contactName: string | null
+  // contactName removed — PII; route no longer returns it.
   contractId: string | null
   contractTitle: string | null
   totalValue: number | null
@@ -46,19 +50,56 @@ export function AuditsView() {
   const { openAudit, openIntake } = useAppStore()
   const [audits, setAudits] = useState<Audit[] | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const load = async () => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    setLoading(true)
+    setError(null)
+    const { data: d, error: e } = await apiGet<{ audits: Audit[] }>('/api/audits', ctrl.signal)
+    if (e) {
+      setError(e.message)
+      toast.error('Failed to load audits', { description: e.message })
+    } else if (d) {
+      setAudits(d.audits)
+    }
+    setLoading(false)
+  }
 
   useEffect(() => {
-    fetch('/api/audits').then(r => r.json()).then(d => {
-      setAudits(d.audits)
-      setLoading(false)
-    }).catch(() => setLoading(false))
+    load()
+    return () => abortRef.current?.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-3">
+      <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true">
         <Skeleton className="h-12 w-full" />
         {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}
+      </div>
+    )
+  }
+
+  if (error && !audits) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <Card className="border-rose-200 dark:border-rose-900">
+          <CardContent className="p-8 text-center">
+            <div className="h-12 w-12 mx-auto rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 flex items-center justify-center mb-3">
+              <AlertCircle className="h-5 w-5" />
+            </div>
+            <p className="text-sm font-medium">Couldn&apos;t load audits</p>
+            <p className="text-xs text-muted-foreground mt-1">{error}</p>
+            <Button variant="outline" size="sm" onClick={load} className="mt-3">
+              <RotateCw className="h-3.5 w-3.5 mr-1.5" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
@@ -143,7 +184,7 @@ export function AuditsView() {
 
                 <div className="mt-4 flex items-center justify-between">
                   <div className="text-xs text-muted-foreground">
-                    Contract value: <span className="text-foreground font-medium">{fmt(a.totalValue)}</span>
+                    Contract value: <span className="text-foreground font-medium">{formatINRCompact(a.totalValue)}</span>
                   </div>
                   <span className="inline-flex items-center gap-1 text-xs text-primary">
                     Open case file <ArrowRight className="h-3 w-3" />
