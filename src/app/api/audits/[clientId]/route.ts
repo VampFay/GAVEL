@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { money } from '@/lib/money'
+import { parseConfidenceBreakdown } from '@/lib/engine/confidence'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,6 +83,7 @@ export async function GET(
       findings: contract.findings.map(f => ({
         ...f,
         impactAmount: money(f.impactAmount),
+        confidenceBreakdown: parseConfidenceBreakdown(f.confidenceBreakdown),
       })),
     },
     project: {

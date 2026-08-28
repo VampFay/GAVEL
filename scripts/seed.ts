@@ -137,8 +137,13 @@ Currency: INR
     { description: 'Telemedicine video integration', rate: 4500, rateUnit: 'hour', quantity: 100, milestone: 'M4', deliveryDate: new Date('2025-06-15') },
     { description: 'Legacy patient records migration (cap 50,000 records)', rate: 2200, rateUnit: 'hour', quantity: 120, milestone: 'M5', deliveryDate: new Date('2025-06-30') },
   ]
+  // Keep the created rows — the seeded findings below reference their ids
+  // in the engine's deterministic `signature` keys, so the FIRST reconcile
+  // run updates these rows in place instead of duplicating them.
+  const lineItemRows: { id: string; description: string }[] = []
   for (const li of lineItems) {
-    await db.lineItem.create({ data: { contractId: contract.id, ...li } })
+    const row = await db.lineItem.create({ data: { contractId: contract.id, ...li } })
+    lineItemRows.push({ id: row.id, description: row.description })
   }
 
   // ─────────────────────── PROJECT & DELIVERY ───────────────────
@@ -210,8 +215,12 @@ Currency: INR
     { clause: '5.2', description: 'Infrastructure / DevOps work billed separately.' },
     { clause: '5.3', description: 'Content migration beyond record count above is out of scope.' },
   ]
+  // Keep the created rows — seeded findings reference their ids in engine
+  // signature keys (see above).
+  const exclusionRowsCreated: { id: string; clause: string | null }[] = []
   for (const e of exclusionRows) {
-    await db.exclusion.create({ data: { contractId: contract.id, ...e } })
+    const row = await db.exclusion.create({ data: { contractId: contract.id, ...e } })
+    exclusionRowsCreated.push({ id: row.id, clause: row.clause })
   }
 
   // ─────────────────────────── INVOICES ──────────────────────────
@@ -261,12 +270,22 @@ Currency: INR
 
   // ─────────────────────────── FINDINGS ──────────────────────────
 
+  // Engine signature keys — these match what runEngine() produces for the
+  // same data, so a reconcile run UPDATES these seeded rows (idempotent
+  // upsert by signature) instead of creating duplicates. F5 below gets NO
+  // signature: it's a hand-typed demo finding the engine would never emit,
+  // and null signature = "not engine-managed".
+  const migrationLi = lineItemRows.find(li => li.description.includes('Legacy patient records migration'))
+  const emrExclusion = exclusionRowsCreated.find(e => e.clause === '5.1')
+  const infraExclusion = exclusionRowsCreated.find(e => e.clause === '5.2')
+
   // F1 — Missed milestone (M4 telemedicine completed but no invoice within 30 days)
   const f1 = await db.finding.create({
     data: {
       contractId: contract.id,
       projectId: project.id,
       type: 'missed_milestone',
+      signature: `missed_milestone:${contract.id}:M4`,
       title: 'M4 — Telemedicine integration completed, no invoice issued',
       summary: 'PR #284 merged on 14 June 2025 closes milestone M4. Per SOW §3, M4 triggers INR 7,00,000. As of today, no invoice line for M4 exists in the billing record.',
       impactAmount: 700000,
@@ -292,6 +311,7 @@ Currency: INR
       contractId: contract.id,
       projectId: project.id,
       type: 'unbilled_overage',
+      signature: migrationLi ? `unbilled_overage:${contract.id}:${migrationLi.id}:#341` : null,
       title: 'Legacy patient-record migration exceeded contracted cap by 37,000 records',
       summary: 'SOW §1.6 caps migration at 50,000 records. PR #341 explicitly migrates records 50,001–87,000. No change order exists. Effort can be valued against §2 rate card (QA engineer INR 2,200/hr).',
       impactAmount: 184000,
@@ -317,6 +337,7 @@ Currency: INR
       contractId: contract.id,
       projectId: project.id,
       type: 'scope_expansion',
+      signature: emrExclusion ? `scope_expansion:${contract.id}:${emrExclusion.id}:#319` : null,
       title: 'EMR prescription endpoint built despite §5.1 exclusion',
       summary: 'SOW §5.1 explicitly excludes backend hospital EMR customization. ENG-149 ("EMR prescription endpoint") was completed (PR #319 merged 12 June). Work was delivered but is outside baseline scope — client authorized verbally per ticket comments, no signed change order.',
       impactAmount: 96000,
@@ -342,6 +363,7 @@ Currency: INR
       contractId: contract.id,
       projectId: project.id,
       type: 'scope_expansion',
+      signature: infraExclusion ? `scope_expansion:${contract.id}:${infraExclusion.id}:#322` : null,
       title: 'K8s ingress hardening delivered (excluded under §5.2)',
       summary: 'SOW §5.2 excludes infrastructure/DevOps work. ENG-152 / PR #322 completed K8s ingress hardening. Recommend: bill as separate infra engagement per rate card.',
       impactAmount: 38000,
@@ -361,7 +383,8 @@ Currency: INR
     { findingId: f4.id, evidenceType: 'billing_record', source: 'invoice', refId: 'none', title: 'No infra invoice found', detail: 'Should be invoiced as separate DevOps line per rate card.', timestamp: new Date('2025-06-10'), weight: 0.1 },
   ]})
 
-  // F5 — Already covered (false positive example to demonstrate review queue dismission)
+  // F5 — Already covered (false positive example to demonstrate review queue dismission).
+  // No signature — the engine would never emit this finding (null = manual).
   const f5 = await db.finding.create({
     data: {
       contractId: contract.id,

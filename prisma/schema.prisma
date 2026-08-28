@@ -328,11 +328,21 @@ model Finding {
   contractId      String?
   projectId       String?
   type            String    // missed_milestone|unbilled_overage|scope_expansion|rate_discrepancy|unauthorized_work
+  // Deterministic engine idempotency key, e.g. "missed_milestone:<contractId>:<milestoneExternalId>".
+  // The reconcile route upserts by this key — NOT by (type, title), which breaks
+  // whenever a rule's generated title wording changes (audit v2, finding #1).
+  // Null = manually-created finding the engine does not manage.
+  signature       String?   @unique
   title           String
   summary         String
   impactAmount    Decimal?  // INR value at stake
   confidence      String    // HIGH|MEDIUM|LOW
   confidenceScore Float?    // 0.0-1.0 composite (NOT money — keep Float)
+  // Per-pillar sub-scores { contract, delivery, authorization, billing } as a
+  // JSON string — "decomposed, not magical" (§9.4; audit v2, finding #2).
+  // SQLite has no Json column type in Prisma; switch to `Json` when the
+  // Postgres migration lands. Null on legacy / manually-created findings.
+  confidenceBreakdown String?
   assessment      String    // billable|already_covered|ambiguous
   recommendedAction String  // approve|dismiss|request_review|draft_change_order
   status          String    @default("pending_review") // pending_review|approved|dismissed|escalated

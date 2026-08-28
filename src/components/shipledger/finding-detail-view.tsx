@@ -31,6 +31,15 @@ interface FindingDetail {
     impactAmount: number | null
     confidence: string
     confidenceScore: number | null
+    // Per-pillar sub-scores computed by the engine (§9.4) — null on legacy
+    // / manually-created findings, in which case we synthesize a fallback
+    // from the evidence weights below.
+    confidenceBreakdown: {
+      contract: number
+      delivery: number
+      authorization: number
+      billing: number
+    } | null
     assessment: string
     recommendedAction: string
     status: string
@@ -146,16 +155,31 @@ export function FindingDetailView() {
     { label: 'Recommended action', value: recommendedActionLabel(f.recommendedAction), icon: AlertTriangle },
   ]
 
-  // Confidence decomposition (synthetic from sub-scores — mirrors §9.4 of the plan)
-  const contractClarity = f.evidence.find(e => e.evidenceType === 'contract_clause')?.weight ?? 0.3
-  const deliveryStrength = f.evidence.filter(e => e.evidenceType === 'delivery_record').reduce((s, e) => s + (e.weight ?? 0), 0)
-  const authorizationPresence = f.evidence.find(e => e.source === 'change_order')?.weight ?? 0.1
-  const billingGapCertainty = f.evidence.find(e => e.evidenceType === 'billing_record')?.weight ?? 0.1
+  // Confidence decomposition — §9.4 of the plan.
+  // Preferred source: the engine-computed, DB-persisted breakdown
+  // ("decomposed, not magical" — the sub-scores are computed where the
+  // evidence is weighed, not reverse-engineered in the client).
+  // Fallback for legacy / manually-created findings (no stored breakdown):
+  // synthesize from the evidence weights so the panel still renders.
+  const fallbackBreakdown = (() => {
+    const contractClarity = f.evidence.find(e => e.evidenceType === 'contract_clause')?.weight ?? 0.3
+    const deliveryStrength = f.evidence.filter(e => e.evidenceType === 'delivery_record').reduce((s, e) => s + (e.weight ?? 0), 0)
+    const authorizationPresence = f.evidence.find(e => e.source === 'change_order')?.weight ?? 0.1
+    const billingGapCertainty = f.evidence.find(e => e.evidenceType === 'billing_record')?.weight ?? 0.1
+    return {
+      contract: Math.min(contractClarity, 1),
+      delivery: Math.min(deliveryStrength, 1),
+      authorization: Math.min(authorizationPresence, 1),
+      billing: Math.min(billingGapCertainty, 1),
+    }
+  })()
+  const breakdown = f.confidenceBreakdown ?? fallbackBreakdown
+  const usingStoredBreakdown = f.confidenceBreakdown != null
   const subScores = [
-    { label: 'Contract clarity', value: Math.min(contractClarity, 1) },
-    { label: 'Delivery-evidence strength', value: Math.min(deliveryStrength, 1) },
-    { label: 'Authorization presence', value: Math.min(authorizationPresence, 1) },
-    { label: 'Billing-gap certainty', value: Math.min(billingGapCertainty, 1) },
+    { label: 'Contract clarity', value: breakdown.contract },
+    { label: 'Delivery evidence', value: breakdown.delivery },
+    { label: 'Authorization', value: breakdown.authorization },
+    { label: 'Billing', value: breakdown.billing },
   ]
 
   return (
@@ -293,7 +317,9 @@ export function FindingDetailView() {
                 <span className="font-semibold">{f.confidenceScore != null ? (f.confidenceScore * 100).toFixed(0) + '%' : '—'}</span>
               </div>
               <p className="mt-2 text-[10px] text-muted-foreground leading-relaxed">
-                Hand-tuned weighted average initially. Only moves to a learned model once enough human-labeled outcomes (approved/dismissed findings) exist to validate one.
+                {usingStoredBreakdown
+                  ? 'Per-pillar sub-scores computed by the reconciliation engine from the evidence rubric (§9.4). Hand-tuned weights; only moves to a learned model once enough human-labeled outcomes exist.'
+                  : 'No engine-computed breakdown stored for this finding (legacy or manually created) — showing sub-scores synthesized from the evidence weights.'}
               </p>
             </CardContent>
           </Card>

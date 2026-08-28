@@ -152,8 +152,23 @@ export interface EngineEvidence {
   weight: number
 }
 
+/**
+ * The four evidence pillars a finding's confidence decomposes into
+ * (the plan's UI mock: Contract 92% / Delivery 97% / Authorization 88% /
+ * Billing 100% — "decomposed, not magical"). Each pillar score is the sum
+ * of the positive weights of the evidence rows belonging to that pillar,
+ * clamped to [0, 1]. Computed in confidence.ts, persisted on Finding as a
+ * JSON string, rendered by the finding-detail UI.
+ */
+export interface ConfidenceBreakdown {
+  contract: number      // contract_clause evidence — how clearly the SOW speaks to this issue
+  delivery: number      // delivery_record evidence — how strongly the code/ticket record shows the work happened
+  authorization: number // change-order evidence — whether a signed CO covers (or fails to cover) the work
+  billing: number       // billing_record evidence — what the invoice record confirms/denies
+}
+
 export interface FindingDraft {
-  /** Logical key — used for idempotent upsert. See src/lib/engine/index.ts. */
+  /** Logical key — used for idempotent upsert (persisted as Finding.signature). */
   signature: string
   type: FindingType
   title: string
@@ -161,6 +176,7 @@ export interface FindingDraft {
   impactAmount: number | null  // INR value at stake (null = unknown / TBD)
   confidence: 'HIGH' | 'MEDIUM' | 'LOW'
   confidenceScore: number     // 0.0–1.0 composite
+  confidenceBreakdown: ConfidenceBreakdown // per-pillar sub-scores (§9.4)
   assessment: 'billable' | 'already_covered' | 'ambiguous'
   recommendedAction: 'approve' | 'dismiss' | 'request_review' | 'draft_change_order'
   contractClause: string | null

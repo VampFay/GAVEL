@@ -8,6 +8,7 @@ import {
 import { getRequestId } from '@/lib/actor'
 import { requireRole } from '@/lib/auth'
 import { money } from '@/lib/money'
+import { parseConfidenceBreakdown } from '@/lib/engine/confidence'
 import {
   ALLOWED_TRANSITIONS,
   ACTION_TO_STATUS,
@@ -36,7 +37,15 @@ export const GET = withErrorHandler(
     })
     if (!finding) return notFound('finding not found')
     // Decimal → number at the response boundary (see src/lib/money.ts).
-    return ok({ finding: { ...finding, impactAmount: money(finding.impactAmount) } })
+    // confidenceBreakdown: JSON string → parsed object (null for legacy /
+    // manually-created findings; the UI synthesizes a fallback).
+    return ok({
+      finding: {
+        ...finding,
+        impactAmount: money(finding.impactAmount),
+        confidenceBreakdown: parseConfidenceBreakdown(finding.confidenceBreakdown),
+      },
+    })
   }
 )
 

@@ -1,4 +1,4 @@
-import type { EngineEvidence, FindingDraft } from './types'
+import type { ConfidenceBreakdown, EngineEvidence, FindingDraft } from './types'
 
 /**
  * Confidence decomposition — §9.4 of the plan.
@@ -55,6 +55,91 @@ export function computeConfidenceScore(evidence: EngineEvidence[]): number {
   return Math.round(raw * 100) / 100
 }
 
+// ─────────────────────── Pillar decomposition (§9.4) ───────────────────────
+
+/**
+ * Map an evidence row to the confidence pillar it supports, or null if it
+ * doesn't belong to a pillar (generic `supporting` context and
+ * `contradicting` evidence affect only the composite, never a pillar).
+ *
+ * Note on authorization: change-order evidence is currently typed
+ * `supporting` with source `change_order` (see the rules) — the pillar
+ * mapping keys on BOTH fields so it lands in the right bucket.
+ */
+function pillarOf(e: EngineEvidence): keyof ConfidenceBreakdown | null {
+  switch (e.evidenceType) {
+    case 'contract_clause':
+      return 'contract'
+    case 'delivery_record':
+      return 'delivery'
+    case 'billing_record':
+      return 'billing'
+    case 'supporting':
+      return e.source === 'change_order' ? 'authorization' : null
+    default:
+      return null // contradicting + anything else: composite-only
+  }
+}
+
+function clamp01(n: number): number {
+  if (n < 0) return 0
+  if (n > 1) return 1
+  return Math.round(n * 100) / 100
+}
+
+/**
+ * Compute the per-pillar confidence sub-scores for a finding's evidence.
+ * Each pillar = sum of the POSITIVE weights of its evidence rows, clamped
+ * to [0, 1]. Negative (contradicting) weights never pull a pillar below
+ * zero — they reduce the composite, and the reviewer sees them as
+ * contradicting rows in the evidence list.
+ */
+export function computeConfidenceBreakdown(evidence: EngineEvidence[]): ConfidenceBreakdown {
+  const sums: ConfidenceBreakdown = {
+    contract: 0,
+    delivery: 0,
+    authorization: 0,
+    billing: 0,
+  }
+  for (const e of evidence) {
+    const pillar = pillarOf(e)
+    if (pillar === null) continue
+    if (e.weight > 0) sums[pillar] += e.weight
+  }
+  return {
+    contract: clamp01(sums.contract),
+    delivery: clamp01(sums.delivery),
+    authorization: clamp01(sums.authorization),
+    billing: clamp01(sums.billing),
+  }
+}
+
+/**
+ * Parse the persisted `Finding.confidenceBreakdown` JSON string back into a
+ * ConfidenceBreakdown object (at the API response boundary). Returns null
+ * for null/unparseable/shape-invalid values — legacy and manually-created
+ * findings have no stored breakdown, and the UI falls back to synthesizing
+ * one from the evidence weights.
+ */
+export function parseConfidenceBreakdown(raw: string | null): ConfidenceBreakdown | null {
+  if (!raw) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    const p = parsed as Record<string, unknown>
+    const pillars = ['contract', 'delivery', 'authorization', 'billing'] as const
+    const out: Partial<ConfidenceBreakdown> = {}
+    for (const pillar of pillars) {
+      const v = p[pillar]
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) return null
+      out[pillar] = v
+    }
+    return out as ConfidenceBreakdown
+  } catch {
+    return null
+  }
+}
+
 /**
  * Map a composite score to a HIGH / MEDIUM / LOW bucket.
  */
@@ -65,14 +150,17 @@ export function bucketConfidence(score: number): 'HIGH' | 'MEDIUM' | 'LOW' {
 }
 
 /**
- * Convenience: stamp a FindingDraft with computed confidenceScore + bucket.
- * Call this from each rule before returning the draft.
+ * Convenience: stamp a FindingDraft with computed confidenceScore + bucket
+ * + per-pillar breakdown. Call this from each rule before returning the draft.
  */
-export function stampConfidence(draft: Omit<FindingDraft, 'confidence' | 'confidenceScore'>): FindingDraft {
+export function stampConfidence(
+  draft: Omit<FindingDraft, 'confidence' | 'confidenceScore' | 'confidenceBreakdown'>
+): FindingDraft {
   const score = computeConfidenceScore(draft.evidence)
   return {
     ...draft,
     confidenceScore: score,
     confidence: bucketConfidence(score),
+    confidenceBreakdown: computeConfidenceBreakdown(draft.evidence),
   }
 }

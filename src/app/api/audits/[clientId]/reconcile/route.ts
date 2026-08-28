@@ -35,15 +35,21 @@ export const dynamic = 'force-dynamic'
  *     "created": N,      // new findings written
  *     "updated": N,      // existing findings updated with new evidence
  *     "skipped": N,      // existing findings unchanged (already in terminal state)
+ *     "adopted": N,      // pre-signature legacy rows stamped with a signature
  *     "ruleStats": {...},
  *     "findings": [...]  // the resulting FindingDrafts (read-only)
  *   }
  *
  * Idempotency:
- *   A Finding is identified by its `signature` field — the engine
+ *   A Finding is identified by its `signature` column — the engine
  *   produces drafts with deterministic signatures like
  *   `missed_milestone:<contractId>:<milestoneExternalId>`. Re-running
- *   the engine finds the same Finding row (or creates it on first run).
+ *   the engine finds the same Finding row (or creates it on first run)
+ *   EVEN IF the rule's generated title wording changed between runs —
+ *   matching by (type, title) broke on title drift (audit v2, finding #1).
+ *   Rows created before the signature column existed (signature IS NULL)
+ *   are adopted once via a (contractId, type, title) legacy match, then
+ *   managed by signature from then on.
  *   Findings in terminal states (approved / dismissed / escalated) are
  *   NOT updated — the reviewer's decision is preserved.
  */
@@ -193,34 +199,59 @@ export const POST = withErrorHandler(
     const output = runEngine(engineInput, { rules: rulesToRun })
 
     // ── Idempotently persist findings ─────────────────────────────
-    // For each FindingDraft, look up by signature. If exists + in a
-    // non-terminal state, update its evidence (delete + re-insert).
-    // If exists + terminal, skip (preserve reviewer's decision).
-    // If not exists, create.
+    // Match order per finding draft:
+    //   1. signature match — the normal path for engine-managed findings
+    //      (unique column; survives title wording changes).
+    //   2. legacy adoption — rows created before the signature column
+    //      existed (signature NULL) are matched once by
+    //      (contractId, type, title) and stamped with the draft's
+    //      signature, so every later run hits path 1.
+    // Then: exists + non-terminal → update (wipe + re-insert evidence);
+    // exists + terminal → skip (preserve the reviewer's decision);
+    // not exists → create.
     let created = 0
     let updated = 0
     let skipped = 0
+    let adopted = 0
 
     await db.$transaction(async tx => {
       for (const draft of output.findings) {
-        // Match by (type, title) for now — TODO: add a `signature` column
-        // to the Finding model for a cleaner idempotency key.
-        const matchByTitle = await tx.finding.findFirst({
-          where: { contractId: contract.id, type: draft.type, title: draft.title },
+        let match = await tx.finding.findUnique({
+          where: { signature: draft.signature },
         })
 
-        if (matchByTitle) {
-          if (matchByTitle.status !== 'pending_review') {
+        if (!match) {
+          // One-time adoption of pre-signature rows (upgrade path).
+          const legacy = await tx.finding.findFirst({
+            where: {
+              contractId: contract.id,
+              type: draft.type,
+              title: draft.title,
+              signature: null,
+            },
+          })
+          if (legacy) {
+            await tx.finding.update({
+              where: { id: legacy.id },
+              data: { signature: draft.signature },
+            })
+            match = { ...legacy, signature: draft.signature }
+            adopted++
+          }
+        }
+
+        if (match) {
+          if (match.status !== 'pending_review') {
             // Reviewer has acted on this finding — preserve their decision.
             skipped++
             continue
           }
           // Update: wipe old evidence + insert new.
-          await tx.findingEvidence.deleteMany({ where: { findingId: matchByTitle.id } })
+          await tx.findingEvidence.deleteMany({ where: { findingId: match.id } })
           if (draft.evidence.length) {
             await tx.findingEvidence.createMany({
               data: draft.evidence.map(e => ({
-                findingId: matchByTitle.id,
+                findingId: match.id,
                 evidenceType: e.evidenceType,
                 source: e.source,
                 refId: e.refId,
@@ -232,12 +263,16 @@ export const POST = withErrorHandler(
             })
           }
           await tx.finding.update({
-            where: { id: matchByTitle.id },
+            where: { id: match.id },
             data: {
+              // Title syncs to the rule's current wording (the signature,
+              // not the title, is the identity — so this is safe).
+              title: draft.title,
               summary: draft.summary,
               impactAmount: toDecimal(draft.impactAmount),
               confidence: draft.confidence,
               confidenceScore: draft.confidenceScore,
+              confidenceBreakdown: JSON.stringify(draft.confidenceBreakdown),
               assessment: draft.assessment,
               recommendedAction: draft.recommendedAction,
               contractClause: draft.contractClause,
@@ -252,11 +287,13 @@ export const POST = withErrorHandler(
               contractId: contract.id,
               projectId: project.id,
               type: draft.type,
+              signature: draft.signature,
               title: draft.title,
               summary: draft.summary,
               impactAmount: toDecimal(draft.impactAmount),
               confidence: draft.confidence,
               confidenceScore: draft.confidenceScore,
+              confidenceBreakdown: JSON.stringify(draft.confidenceBreakdown),
               assessment: draft.assessment,
               recommendedAction: draft.recommendedAction,
               contractClause: draft.contractClause,
@@ -292,7 +329,7 @@ export const POST = withErrorHandler(
           action: 'reconcile',
           entityType: 'contract',
           entityId: contract.id,
-          detail: `Engine run — rules: ${rulesToRun.map(r => r.type).join(', ')}; created ${created}, updated ${updated}, skipped ${skipped}`,
+          detail: `Engine run — rules: ${rulesToRun.map(r => r.type).join(', ')}; created ${created}, updated ${updated}, skipped ${skipped}, adopted ${adopted}`,
           requestId: requestId ?? undefined,
         },
       })
@@ -302,6 +339,7 @@ export const POST = withErrorHandler(
       created,
       updated,
       skipped,
+      adopted,
       ruleStats: output.ruleStats,
       findings: output.findings.map(f => ({
         ...f,

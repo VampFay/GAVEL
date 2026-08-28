@@ -17,6 +17,8 @@ import {
 } from '../../src/lib/engine/entity-resolution'
 import {
   computeConfidenceScore,
+  computeConfidenceBreakdown,
+  parseConfidenceBreakdown,
   bucketConfidence,
   stampConfidence,
   EVIDENCE_WEIGHTS,
@@ -325,6 +327,20 @@ describe('runEngine — end-to-end against seed-mirroring fixture', () => {
     }
   })
 
+  it('every finding has a decomposed confidence breakdown (four pillars, each in [0, 1])', () => {
+    // "Decomposed, not magical" — the composite must always be backed by
+    // per-pillar sub-scores the reviewer can inspect (audit v2, finding #2).
+    for (const f of output.findings) {
+      expect(f.confidenceBreakdown).toBeDefined()
+      for (const pillar of ['contract', 'delivery', 'authorization', 'billing'] as const) {
+        const v = f.confidenceBreakdown[pillar]
+        expect(v).toBeGreaterThanOrEqual(0)
+        expect(v).toBeLessThanOrEqual(1)
+        expect(Number.isFinite(v)).toBe(true)
+      }
+    }
+  })
+
   it('every finding has a deterministic signature', () => {
     for (const f of output.findings) {
       expect(f.signature.length).toBeGreaterThan(0)
@@ -333,6 +349,16 @@ describe('runEngine — end-to-end against seed-mirroring fixture', () => {
       expect(f.signature).toContain('test-contract')
       expect(f.signature).toContain(f.type)
     }
+  })
+
+  it('missed_milestone signatures include the milestone externalId', () => {
+    // The signature — NOT the title — is the upsert key (audit v2,
+    // finding #1). It must pin the exact subject (milestone) so a title
+    // rewording never duplicates a finding.
+    const m4 = output.findings.find(
+      f => f.type === 'missed_milestone' && f.title.includes('M4')
+    )
+    expect(m4?.signature).toBe('missed_milestone:test-contract:M4')
   })
 
   it('running the engine twice produces identical output (pure function)', () => {
@@ -571,6 +597,95 @@ describe('confidence decomposition', () => {
       })
       expect(stamped.confidenceScore).toBeCloseTo(0.55, 2)
       expect(stamped.confidence).toBe('MEDIUM')
+    })
+    it('stamps the draft with a four-pillar breakdown', () => {
+      const stamped = stampConfidence({
+        signature: 'test',
+        type: 'missed_milestone',
+        title: 'Test',
+        summary: '',
+        impactAmount: null,
+        assessment: 'billable',
+        recommendedAction: 'approve',
+        contractClause: null,
+        billingState: null,
+        evidence: [
+          { weight: 0.3, evidenceType: 'contract_clause', source: 'sow', refId: null, title: '', detail: null, timestamp: null },
+          { weight: 0.25, evidenceType: 'delivery_record', source: 'github', refId: null, title: '', detail: null, timestamp: null },
+          { weight: 0.2, evidenceType: 'supporting', source: 'change_order', refId: null, title: '', detail: null, timestamp: null },
+          { weight: 0.2, evidenceType: 'billing_record', source: 'invoice', refId: null, title: '', detail: null, timestamp: null },
+        ],
+      })
+      expect(stamped.confidenceBreakdown.contract).toBeCloseTo(0.3, 2)
+      expect(stamped.confidenceBreakdown.delivery).toBeCloseTo(0.25, 2)
+      expect(stamped.confidenceBreakdown.authorization).toBeCloseTo(0.2, 2)
+      expect(stamped.confidenceBreakdown.billing).toBeCloseTo(0.2, 2)
+    })
+  })
+
+  describe('computeConfidenceBreakdown', () => {
+    it('assigns each evidence type to its pillar', () => {
+      const breakdown = computeConfidenceBreakdown([
+        { weight: 0.3, evidenceType: 'contract_clause', source: 'sow', refId: null, title: '', detail: null, timestamp: null },
+        { weight: 0.25, evidenceType: 'delivery_record', source: 'github', refId: null, title: '', detail: null, timestamp: null },
+        { weight: 0.2, evidenceType: 'supporting', source: 'change_order', refId: null, title: '', detail: null, timestamp: null },
+        { weight: 0.2, evidenceType: 'billing_record', source: 'invoice', refId: null, title: '', detail: null, timestamp: null },
+      ])
+      expect(breakdown.contract).toBeCloseTo(0.3, 2)
+      expect(breakdown.delivery).toBeCloseTo(0.25, 2)
+      expect(breakdown.authorization).toBeCloseTo(0.2, 2)
+      expect(breakdown.billing).toBeCloseTo(0.2, 2)
+    })
+    it('sums multiple evidence rows into the same pillar, clamped to [0, 1]', () => {
+      const breakdown = computeConfidenceBreakdown([
+        { weight: 0.25, evidenceType: 'delivery_record', source: 'github', refId: null, title: '', detail: null, timestamp: null },
+        { weight: 0.25, evidenceType: 'delivery_record', source: 'jira', refId: null, title: '', detail: null, timestamp: null },
+        { weight: 0.9, evidenceType: 'delivery_record', source: 'github', refId: null, title: '', detail: null, timestamp: null },
+      ])
+      expect(breakdown.delivery).toBe(1) // 1.4 clamped to 1
+      expect(breakdown.contract).toBe(0)
+    })
+    it('contradicting evidence never pulls a pillar down (composite-only)', () => {
+      const breakdown = computeConfidenceBreakdown([
+        { weight: 0.3, evidenceType: 'contract_clause', source: 'sow', refId: null, title: '', detail: null, timestamp: null },
+        { weight: -0.5, evidenceType: 'contradicting', source: 'invoice', refId: null, title: '', detail: null, timestamp: null },
+      ])
+      expect(breakdown.contract).toBeCloseTo(0.3, 2)
+      // …but it does reduce the composite:
+      expect(computeConfidenceScore([
+        { weight: 0.3, evidenceType: 'contract_clause', source: 'sow', refId: null, title: '', detail: null, timestamp: null },
+        { weight: -0.5, evidenceType: 'contradicting', source: 'invoice', refId: null, title: '', detail: null, timestamp: null },
+      ])).toBe(0)
+    })
+    it('generic supporting evidence (non-change-order) lands in NO pillar', () => {
+      const breakdown = computeConfidenceBreakdown([
+        { weight: 0.1, evidenceType: 'supporting', source: 'jira', refId: null, title: '', detail: null, timestamp: null },
+      ])
+      expect(breakdown.contract).toBe(0)
+      expect(breakdown.delivery).toBe(0)
+      expect(breakdown.authorization).toBe(0)
+      expect(breakdown.billing).toBe(0)
+    })
+  })
+
+  describe('parseConfidenceBreakdown', () => {
+    it('round-trips a computed breakdown through JSON', () => {
+      const breakdown = computeConfidenceBreakdown([
+        { weight: 0.3, evidenceType: 'contract_clause', source: 'sow', refId: null, title: '', detail: null, timestamp: null },
+        { weight: 0.25, evidenceType: 'delivery_record', source: 'github', refId: null, title: '', detail: null, timestamp: null },
+      ])
+      const parsed = parseConfidenceBreakdown(JSON.stringify(breakdown))
+      expect(parsed).toEqual(breakdown)
+    })
+    it('returns null for null / malformed JSON', () => {
+      expect(parseConfidenceBreakdown(null)).toBeNull()
+      expect(parseConfidenceBreakdown('not json')).toBeNull()
+      expect(parseConfidenceBreakdown('{"contract":0.3}')).toBeNull() // missing pillars
+    })
+    it('returns null for out-of-range or non-numeric pillar values', () => {
+      expect(parseConfidenceBreakdown('{"contract":1.5,"delivery":0,"authorization":0,"billing":0}')).toBeNull()
+      expect(parseConfidenceBreakdown('{"contract":-0.1,"delivery":0,"authorization":0,"billing":0}')).toBeNull()
+      expect(parseConfidenceBreakdown('{"contract":"high","delivery":0,"authorization":0,"billing":0}')).toBeNull()
     })
   })
 

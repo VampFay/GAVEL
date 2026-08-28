@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomBytes } from 'node:crypto'
 import { verifyToken, type AuthClaims } from '@/lib/auth'
 import { getAuthCookieName } from '@/lib/auth-cookie'
+import { getEnv } from '@/lib/env'
 
 /**
  * Request-level middleware.
@@ -32,6 +33,10 @@ import { getAuthCookieName } from '@/lib/auth-cookie'
  *      - All other /api routes — require a verified JWT (any role).
  *        Specific mutating actions get tighter `requireRole(...)` checks
  *        in the route handler itself.
+ *      - DEV ONLY: unauthenticated GETs pass as 'anonymous' so seeded demo
+ *        data stays browsable. Prod (or SHIPLEDGER_REQUIRE_AUTH=true)
+ *        requires auth on every route — see the comment at the bottom
+ *        of this file for the NODE_ENV operational risk.
  *
  * What this is NOT:
  *   - Rate limiting. Add a sliding-window limiter keyed on user-id+IP
@@ -48,6 +53,9 @@ const OPEN_PATHS = new Set([
   '/api/auth/login',
   '/api/auth/logout',
 ])
+
+// Warn-once flag for the dev-only anonymous-GET escape hatch (below).
+let warnedAnonymousGet = false
 
 export async function middleware(req: NextRequest) {
   const { method, nextUrl } = req
@@ -115,8 +123,25 @@ export async function middleware(req: NextRequest) {
   // In dev, allow GETs through as 'anonymous' (so the seeded demo data
   // is browsable without logging in). In prod, every GET requires auth
   // too (the audit's P0 finding: GET routes were open to anyone).
-  const isProd = process.env.NODE_ENV === 'production'
-  if (!isProd && !MUTATION_METHODS.has(method)) {
+  //
+  // OPERATIONAL RISK (audit v2, finding #3): this dev escape hatch is
+  // keyed on NODE_ENV, so it is WORTHLESS if the deploy target doesn't
+  // actually set NODE_ENV=production. Two mitigations:
+  //   1. SHIPLEDGER_REQUIRE_AUTH=true forces strict auth regardless of
+  //      NODE_ENV — set it on any deploy whose NODE_ENV you don't trust.
+  //   2. Warn once per process so a misconfigured deploy is visible in
+  //      the logs instead of silently serving anonymous GETs.
+  const env = getEnv()
+  const requireAuth = env.NODE_ENV === 'production' || env.SHIPLEDGER_REQUIRE_AUTH === true
+  if (!requireAuth && !MUTATION_METHODS.has(method)) {
+    if (!warnedAnonymousGet) {
+      warnedAnonymousGet = true
+      console.warn(
+        '⚠️  ShipLedger: anonymous GET access is ENABLED (non-production NODE_ENV). ' +
+        'Set NODE_ENV=production — or SHIPLEDGER_REQUIRE_AUTH=true — on every deploy ' +
+        'that serves real client data.'
+      )
+    }
     return response
   }
   // All mutations require auth, even in dev. Strict-by-default.
