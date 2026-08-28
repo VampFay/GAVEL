@@ -33,21 +33,43 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>
 
+/**
+ * Parse an arbitrary env record against the schema. Pure (no process.env
+ * access, no caching) so tests can exercise validation directly.
+ *
+ * Empty-string normalization: deployment platforms (Vercel/Render/Docker
+ * .env copies) routinely inject EMPTY strings for vars the user never set.
+ * zod treats '' as present, so `.min(32)` / `.url()` would reject vars that
+ * are effectively unset — worse, `.env.example`-style templates with blank
+ * `KEY=` lines would crash `getEnv()` at startup. Rule: an empty value is
+ * the same as an absent one, for every var. (A truly required var that is
+ * blank therefore surfaces as "required", which is the clearer error.)
+ */
+export function parseEnv(record: Record<string, unknown>): Env {
+  const pruned = Object.fromEntries(
+    Object.entries(record).filter(([, v]) => v !== '' && v !== undefined)
+  )
+  const parsed = envSchema.safeParse(pruned)
+  if (!parsed.success) {
+    // Fail fast — print missing/invalid vars, then crash. Better than a
+    // half-running server reading `undefined` everywhere. The details go
+    // INTO the thrown message too: log aggregation often separates
+    // console.error lines from the stack trace, and "which var was wrong"
+    // is the one thing an on-call engineer needs first.
+    const details = parsed.error.issues
+      .map(issue => `  - ${issue.path.join('.')}: ${issue.message}`)
+      .join('\n')
+    console.error(`❌ Invalid environment configuration:\n${details}`)
+    throw new Error(`Environment validation failed:\n${details}`)
+  }
+  return parsed.data
+}
+
 let cached: Env | null = null
 
 export function getEnv(): Env {
   if (cached) return cached
-  const parsed = envSchema.safeParse(process.env)
-  if (!parsed.success) {
-    // Fail fast — print missing/invalid vars, then crash. Better than a
-    // half-running server reading `undefined` everywhere.
-    console.error('❌ Invalid environment configuration:')
-    for (const issue of parsed.error.issues) {
-      console.error(`  - ${issue.path.join('.')}: ${issue.message}`)
-    }
-    throw new Error('Environment validation failed — see logs above.')
-  }
-  cached = parsed.data
+  cached = parseEnv(process.env)
   return cached
 }
 

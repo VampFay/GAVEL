@@ -23,6 +23,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Explicit (postinstall also covers this): without a generated client,
+      # typecheck fails on every Prisma import — the exact failure mode the
+      # v3 audit hit in its own sandbox.
+      - name: Generate Prisma client
+        run: bunx prisma generate
+
       - name: Lint
         run: bun run lint
 
