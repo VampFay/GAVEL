@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -52,6 +53,10 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Sandbox / runner infrastructure — never ship in exports
+/.zscripts/
+/mini-services/
 
 # SQLite DB — should never be a committed artifact; the deploy bundler
 # ships an empty prod DB at .zscripts/database-runtime-build.sh
