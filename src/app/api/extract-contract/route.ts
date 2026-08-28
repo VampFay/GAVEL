@@ -1,5 +1,4 @@
 import { NextRequest } from 'next/server'
-import { createHash } from 'node:crypto'
 import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
 import { ok, fail, invalidRequest, withErrorHandler } from '@/lib/api'
@@ -200,11 +199,12 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     rawNotes: Array.isArray(extracted.rawNotes) ? extracted.rawNotes.filter((n: unknown) => typeof n === 'string') : [],
   }
 
-  // Idempotency: hash of rawText. If a contract with the same hash already
-  // exists for the same client, return it instead of creating a duplicate.
-  const contentHash = createHash('sha256').update(rawText).digest('hex')
+  // Idempotency: an identical rawText for the same client returns the
+  // existing contract instead of creating a duplicate. (Note: exact-text
+  // match, not a content hash — the text IS the identity here.)
   let contractId: string | null = null
 
+  let reused = false
   if (persist && clientId) {
     // Wrap the entire write in a transaction: contract create + line items
     // + milestones + exclusions + audit-log. All-or-nothing.
@@ -223,7 +223,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
             action: 'extract',
             entityType: 'contract',
             entityId: existing.id,
-            detail: `Idempotent re-extraction (content hash match) — returning existing contract`,
+            detail: `Idempotent re-extraction (identical rawText) — returning existing contract`,
             requestId: requestId ?? undefined,
           },
         })
@@ -241,6 +241,22 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
           rawText,
           extractedJson: JSON.stringify(validated),
           status: 'active',
+        },
+      })
+
+      // Create the delivery-side Project for this contract. Without it,
+      // POST /api/audits/[clientId]/reconcile fails with "client has no
+      // project" — the engine maps delivery records (tickets, code
+      // activities) through the project row, and the intake flow was
+      // creating contracts that could never be reconciled.
+      await tx.project.create({
+        data: {
+          clientId,
+          contractId: newContract.id,
+          name: validated.title ?? `Audit project — ${newContract.title}`,
+          status: 'active',
+          startDate: validated.effectiveDate ? new Date(validated.effectiveDate) : new Date(),
+          endDate: validated.endDate ? new Date(validated.endDate) : null,
         },
       })
 
@@ -302,11 +318,14 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     })
 
     contractId = c.id
+    reused = c.reused
   }
 
   return ok({
     contractId,
-    reused: contractId !== null ? null : null, // explicitly null when not persisted
+    // True when the same rawText was already extracted for this client —
+    // the existing contract (and its project) was returned unchanged.
+    reused: persist && clientId ? reused : null,
     extracted: validated,
     // Intentionally NOT echoing raw LLM content — info disclosure.
   })

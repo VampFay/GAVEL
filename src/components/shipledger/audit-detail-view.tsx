@@ -200,11 +200,11 @@ export function AuditDetailView() {
           <div className="grid grid-cols-1 md:grid-cols-7 gap-2 md:gap-1 items-center">
             <FlowNode icon={FileText} title="SOW" sub={`${contract.lineItems.length} line items`} tone="emerald" />
             <FlowArrow />
-            <FlowNode icon={Layers} title="Normalize" sub="LLM + deterministic" tone="emerald" />
+            <FlowNode icon={Layers} title="Normalize" sub="LLM extraction + validation" tone="emerald" />
             <FlowArrow />
             <FlowNode icon={GitBranch} title="Entity resolution" sub={`${project.tickets.length} tickets · ${project.codeActivities.length} PRs`} tone="emerald" />
             <FlowArrow />
-            <FlowNode icon={AlertTriangle} title="Forensic engine" sub="rules + LLM" tone="amber" />
+            <FlowNode icon={AlertTriangle} title="Forensic engine" sub="3 deterministic rules" tone="amber" />
           </div>
           <div className="hidden md:block mt-1" />
           <div className="grid grid-cols-1 md:grid-cols-7 gap-2 md:gap-1 items-center mt-2">

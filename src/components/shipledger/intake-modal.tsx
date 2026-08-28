@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
 import {
-  Upload, FileText, GitBranch, ClipboardList, Loader2,
+  FileText, GitBranch, ClipboardList, Loader2,
   CheckCircle2, ArrowRight, ArrowLeft, Sparkles, X,
   IndianRupee, Building2, AlertCircle,
 } from 'lucide-react'
@@ -211,8 +211,10 @@ export function IntakeModal() {
                 <Loader2 className="h-8 w-8 text-primary animate-spin" />
                 <h3 className="mt-4 text-sm font-medium">Extracting contract structure</h3>
                 <p className="mt-1 text-xs text-muted-foreground max-w-md">
-                  Calling the LLM with tool-use against a fixed JSON schema. Validating against deterministic rules
-                  (dates parse, amounts parse, required fields present). Never trusting extraction output directly into a finding.
+                  Calling the LLM against a fixed JSON schema, then validating every field with
+                  deterministic rules (dates parse, amounts parse). If the output fails validation
+                  it is re-prompted — up to 3 attempts — never salvaged with regex. Extraction output
+                  is never trusted directly into a finding; a human reviews it next.
                 </p>
                 <div className="mt-6 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
                   <div className="rounded border border-border p-2"><FileText className="h-3 w-3 mx-auto mb-1 text-primary" /> scope items</div>
@@ -239,6 +241,7 @@ export function IntakeModal() {
 
             {step === 'engine' && (
               <EngineStep
+                clientId={activeClientId || selectedClientId}
                 contractId={contractId}
                 onBack={() => setStep('delivery')}
                 onComplete={() => setStep('done')}
@@ -586,31 +589,35 @@ function Tile({ label, value }: { label: string; value: string }) {
 function DeliveryStep({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
   return (
     <div>
-      <h3 className="text-sm font-medium">4. Attach delivery records</h3>
+      <h3 className="text-sm font-medium">4. Delivery records</h3>
       <p className="text-xs text-muted-foreground mt-1">
-        In production this is where live OAuth connectors pull from GitHub, Jira, Linear. For this demo we&apos;ll proceed with the seeded delivery records (already linked to the demo client) so you can see the full forensic flow.
+        The engine reconciles against every delivery record already linked to this client in
+        the database. Live OAuth connectors (GitHub, Jira, Linear, QuickBooks) are Phase 2 —
+        record upload lands with them. Below is what each connector will feed once configured.
       </p>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
-        <DropZone icon={GitBranch} title="GitHub / GitLab export" sub="commits, PRs, merges, deploys" />
-        <DropZone icon={ClipboardList} title="Jira / Linear export" sub="tickets, epics, status, assignees" />
+        <DropZone icon={GitBranch} title="GitHub / GitLab" sub="commits, PRs, merges, deploys" />
+        <DropZone icon={ClipboardList} title="Jira / Linear" sub="tickets, epics, status, assignees" />
         <DropZone icon={IndianRupee} title="Invoices / accounting" sub="QuickBooks, Xero, CSV" />
         <DropZone icon={FileText} title="Change orders" sub="signed COs for scope additions" />
       </div>
 
       <div className="mt-4 p-3 rounded border border-dashed border-border bg-muted/30 text-xs text-muted-foreground">
-        <strong>Demo note:</strong> the live connectors (Phase 2 of the plan) require per-provider OAuth Apps to be configured
-        per tenant. For this sandbox we use the seeded delivery records for <code className="text-[10px]">Aetherworks / Veridian Patient Portal</code> so the forensic engine has real evidence to reconcile against.
+        <strong>Today:</strong> the engine reconciles against records already in the database — the seeded
+        demo client (<code className="text-[10px]">Aetherworks / Veridian Patient Portal</code>) has full
+        delivery data (tickets, PRs, invoices). A newly-intaked client has a contract but no delivery records
+        yet, so its first engine run will honestly return zero findings until connectors land.
       </div>
 
       <div className="mt-5 flex justify-between">
         <Button variant="outline" onClick={onBack}>
-          <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
           Back
         </Button>
         <Button onClick={onNext} className="bg-primary text-primary-foreground hover:bg-primary/90">
           Run forensic engine
-          <ArrowRight className="h-3.5 w-3.5 ml-1" />
+          <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
         </Button>
       </div>
     </div>
@@ -618,77 +625,163 @@ function DeliveryStep({ onBack, onNext }: { onBack: () => void; onNext: () => vo
 }
 
 function DropZone({ icon: Icon, title, sub }: { icon: React.ComponentType<{ className?: string }>; title: string; sub: string }) {
+  // Static informational tile — NOT interactive. An earlier version showed
+  // cursor-pointer + hover affordances with a disabled upload button, which
+  // read as a clickable element that did nothing. Upload arrives with the
+  // Phase-2 connectors; until then this tile only describes the data source.
   return (
-    <div className="border-2 border-dashed border-border rounded-lg p-5 text-center hover:border-primary/40 transition-colors cursor-pointer">
+    <div className="border-2 border-dashed border-border rounded-lg p-5 text-center">
       <div className="h-9 w-9 mx-auto rounded-md bg-primary/10 text-primary flex items-center justify-center mb-2">
         <Icon className="h-4 w-4" />
       </div>
       <div className="text-xs font-medium">{title}</div>
       <div className="text-[10px] text-muted-foreground mt-0.5">{sub}</div>
-      <Button variant="ghost" size="sm" className="mt-2 h-6 text-[10px]" disabled>
-        <Upload className="h-3 w-3 mr-1" />
-        Upload (demo)
-      </Button>
+      <Badge variant="outline" className="mt-2 text-[9px] text-muted-foreground">Phase 2 connector</Badge>
     </div>
   )
 }
 
-function EngineStep({ contractId, onBack, onComplete }: { contractId: string | null; onBack: () => void; onComplete: () => void }) {
-  // Previously this step faked a multi-stage forensic-engine progress bar
-  // with `setTimeout(r, 500)` per stage and copy that read like a real
-  // pipeline ("Blocking: filter candidates by date range + keyword/embedding
-  // overlap", "Scoring: semantic_similarity × 0.5 + ..."). That was
-  // misleading — the actual engine (§9.1 entity resolution + §9.3 rules
-  // engine) is not implemented yet. The honest version below shows what
-  // WAS done (LLM contract extraction persisted in step 3) and what's NOT
-  // done yet (cross-system entity resolution, deterministic gap rules).
+interface ReconcileResult {
+  ok: boolean
+  created: number
+  updated: number
+  skipped: number
+  adopted: number
+  findings: Array<{
+    type: string
+    title: string
+    summary: string
+    impactAmount: number | null
+    confidence: string
+  }>
+}
+
+function EngineStep({
+  clientId,
+  contractId,
+  onBack,
+  onComplete,
+}: {
+  clientId: string
+  contractId: string | null
+  onBack: () => void
+  onComplete: () => void
+}) {
+  // This step RUNS the real deterministic reconciliation engine
+  // (POST /api/audits/[clientId]/reconcile - §9.3 rules against contract +
+  // delivery + billing rows) and shows its actual output. An earlier
+  // version of this step showed a static "engine is on the roadmap" panel
+  // with a fake setTimeout progress bar - the engine existed by then; the
+  // panel was stale. This is the wired version.
+  const [result, setResult] = useState<ReconcileResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const res = await fetch(`/api/audits/${clientId}/reconcile`, { method: 'POST' })
+        const d = await res.json()
+        if (!cancelled) {
+          if (d.ok) setResult(d)
+          else setError(d.error ?? 'reconcile failed')
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'network error')
+      }
+    }
+    run()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId])
+
+  const findingCount = result ? result.findings.length : 0
+
   return (
     <div>
-      <h3 className="text-sm font-medium">5. Contract extraction complete</h3>
+      <h3 className="text-sm font-medium">5. Forensic engine</h3>
       <p className="text-xs text-muted-foreground mt-1">
-        The SOW text was passed through the LLM extraction pipeline and a structured contract record
-        {contractId ? ' was persisted' : ' was returned (not persisted)'}.
+        Running the deterministic reconciliation engine against the contract
+        {contractId ? ' (persisted in step 3)' : ''} and every delivery + billing
+        record linked to this client.
       </p>
 
-      <div className="mt-4 p-4 rounded border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/20">
-        <div className="flex items-start gap-2">
-          <CheckCircle2 className="h-4 w-4 mt-0.5 text-emerald-600 dark:text-emerald-300" />
-          <div className="text-xs">
-            <div className="font-medium text-emerald-900 dark:text-emerald-200">Contract extraction</div>
-            <div className="text-emerald-700 dark:text-emerald-300 mt-0.5">
-              Line items, milestones, and exclusions were parsed from the SOW and stored.
-              {contractId && <span className="font-mono text-[10px]"> ref: {contractId.slice(-8)}</span>}
-            </div>
-          </div>
+      {!result && !error && (
+        <div className="mt-8 py-10 flex flex-col items-center text-center">
+          <Loader2 className="h-7 w-7 text-primary animate-spin" />
+          <p className="mt-3 text-xs text-muted-foreground">
+            Reconciling milestones, line items, and exclusions against tickets, code
+            activity, and invoices…
+          </p>
         </div>
-      </div>
+      )}
 
-      <div className="mt-3 p-4 rounded border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/20">
-        <div className="flex items-start gap-2">
-          <AlertCircle className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-300" />
-          <div className="text-xs">
-            <div className="font-medium text-amber-900 dark:text-amber-200">Forensic reconciliation — roadmap</div>
-            <div className="text-amber-700 dark:text-amber-300 mt-0.5">
-              The full forensic engine (§9.1 entity resolution across GitHub / Jira / invoices + §9.3 deterministic
-              gap-detection rules + §9.4 decomposed confidence scoring) is on the roadmap. For this demo, no
-              findings are auto-generated from the extracted contract — see the review queue for pre-seeded
-              examples of what those findings will look like.
+      {error && (
+        <div className="mt-4 p-4 rounded border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/20">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 mt-0.5 text-rose-600 dark:text-rose-300" />
+            <div className="text-xs">
+              <div className="font-medium text-rose-900 dark:text-rose-200">Engine run failed</div>
+              <div className="text-rose-700 dark:text-rose-300 mt-0.5">{error}</div>
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {result && (
+        <>
+          <div className="mt-4 grid grid-cols-4 gap-2">
+            <Tile label="New findings" value={String(result.created)} />
+            <Tile label="Updated" value={String(result.updated)} />
+            <Tile label="Unchanged" value={String(result.skipped)} />
+            <Tile label="Total" value={String(findingCount)} />
+          </div>
+
+          {findingCount > 0 ? (
+            <div className="mt-4 space-y-2 max-h-56 overflow-y-auto scrollbar-thin">
+              {result.findings.map((f, i) => (
+                <div key={i} className="flex items-start justify-between gap-3 p-2.5 rounded border border-border text-xs">
+                  <div className="min-w-0">
+                    <div className="font-medium leading-snug">{f.title}</div>
+                    <div className="text-[10px] text-muted-foreground mt-1">{f.type.replace(/_/g, ' ')} · {f.confidence} confidence</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-medium text-primary">{formatINR(f.impactAmount)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 p-4 rounded border border-dashed border-border bg-muted/30 text-xs text-muted-foreground">
+              <strong className="text-foreground">No findings.</strong> The engine ran
+              against everything linked to this client. A freshly-intaked contract has no
+              delivery records (tickets, PRs, invoices) attached yet — those arrive with
+              the live connectors (roadmap, Phase 2). Until then the engine legitimately
+              has nothing to reconcile against. The seeded demo client has full delivery
+              data — reconcile it from the Audits view to see findings come out.
+            </div>
+          )}
+
+          <p className="mt-3 text-[10px] text-muted-foreground">
+            Findings are persisted idempotently — re-running the engine updates evidence
+            on existing findings instead of duplicating them, and never touches findings
+            a reviewer has already acted on.
+          </p>
+        </>
+      )}
 
       <div className="mt-5 flex justify-between">
-        <Button variant="outline" onClick={onBack}>
-          <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+        <Button variant="outline" onClick={onBack} disabled={!result && !error}>
+          <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
           Back
         </Button>
         <Button
           onClick={onComplete}
+          disabled={!result && !error}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           View review queue
-          <ArrowRight className="h-3.5 w-3.5 ml-1" />
+          <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
         </Button>
       </div>
     </div>

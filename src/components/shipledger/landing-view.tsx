@@ -51,9 +51,9 @@ export function LandingView() {
           {/* Headline metrics */}
           <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-4xl">
             {[
-              { label: 'Avg unbilled identified', value: '₹6.8 L', sub: 'per audit, Phase-0 sample' },
-              { label: 'Findings accepted', value: '78%', sub: 'after human review' },
-              { label: 'Time to first finding', value: '<48 h', sub: 'from intake' },
+              { label: 'Target: unbilled identified', value: '₹6.8 L', sub: 'Phase-0 target — not yet measured' },
+              { label: 'Target: findings accepted', value: '78%', sub: 'Phase-0 target — not yet measured' },
+              { label: 'Target: time to first finding', value: '<48 h', sub: 'Phase-0 target — not yet measured' },
               { label: 'Audit fee', value: '₹25k–₹1 L', sub: 'or 10% success fee' },
             ].map(m => (
               <div key={m.label} className="text-left">
@@ -130,7 +130,7 @@ export function LandingView() {
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 shrink-0" />
-                    <span>Read-only OAuth. The product proposes, it never asserts.</span>
+                    <span>The product proposes, a human asserts — nothing is auto-billed.</span>
                   </li>
                 </ul>
               </CardContent>
@@ -154,7 +154,7 @@ export function LandingView() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
               { icon: FileText, title: '1 · Contracts / SOW', desc: 'LLM-assisted extraction of scope items, rate cards, milestones, exclusions, change-order policy. Validated against deterministic rules — dates parse, amounts parse.' },
-              { icon: Layers, title: '2 · Normalize & resolve', desc: 'Jira / Linear tickets, GitHub / GitLab PRs, commits, merges — entity-resolved against contract line items via embedding + explicit reference + temporal proximity.' },
+              { icon: Layers, title: '2 · Normalize & resolve', desc: 'Jira / Linear tickets, GitHub / GitLab PRs, commits, merges — entity-resolved against contract line items by exact reference and deterministic keyword overlap (embedding-based matching lands with the pgvector migration).' },
               { icon: AlertTriangle, title: '3 · Forensic engine', desc: 'Deterministic rules catch missed milestones, unbilled overages, scope-creep language. LLM judgment reserved for ambiguous calls — always routed to human review.' },
               { icon: ClipboardCheck, title: '4 · Human review → case file', desc: 'Decomposed confidence scoring. Approve, dismiss, escalate. Approved findings become the evidence-backed case file you bring to your client.' },
             ].map(s => {
@@ -174,8 +174,8 @@ export function LandingView() {
           </div>
 
           <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FlowItem icon={GitBranch} title="Read-only connectors" body="GitHub App, Atlassian, Linear, QuickBooks, Xero — least-privilege OAuth, independently revocable per provider. We never request write access to your repos or PM tools." />
-            <FlowItem icon={ShieldCheck} title="Tenant isolation" body="Postgres row-level isolation per tenant. Encryption at rest (KMS) and in transit (TLS). Immutable audit log captures every access, review, export, finding action." />
+            <FlowItem icon={GitBranch} title="Read-only connectors (Phase 2)" body="GitHub App, Atlassian, Linear, QuickBooks, Xero — least-privilege OAuth, independently revocable per provider, read-only scopes. Design goal; connectors ship in Phase 2 — today contracts are pasted and delivery records are ingested directly." />
+            <FlowItem icon={ShieldCheck} title="Tenant isolation (planned)" body="Today: role-based access control and an immutable audit log on every action. Planned with the Postgres migration: row-level tenant isolation and encryption at rest (KMS)." />
             <FlowItem icon={Activity} title="Continuous monitoring (Phase 3)" body="Always-on reconciliation of active projects. Statistical drift detection on delivery-to-billing ratio. Real-time alerts. Auto-drafted change orders — human-approved, never auto-sent." />
           </div>
         </div>

@@ -72,8 +72,12 @@ export function MonitoringView() {
     return () => abortRef.current?.abort()
   }, [load])
 
-  const ackAlert = async (monitoredId: string, alertId: string) => {
-    const { error: e } = await apiPatch(`/api/monitoring/${monitoredId}`, {
+  const ackAlert = async (alertId: string) => {
+    // The route's [id] param IS the alert id for action:'ack' (see
+    // PATCH /api/monitoring/[id]). The previous implementation sent the
+    // MONITORED-PROJECT id in the path and never sent the alert id — every
+    // Ack click failed with 404 "record not found".
+    const { error: e } = await apiPatch(`/api/monitoring/${alertId}`, {
       action: 'ack',
       acknowledged: true,
     })
@@ -229,8 +233,10 @@ export function MonitoringView() {
                   ) : (
                     <div className="h-32 flex items-center justify-center text-xs text-muted-foreground border border-dashed border-border rounded">
                       <div className="text-center">
-                        <RotateCw className="h-4 w-4 animate-spin mx-auto mb-2 opacity-50" />
-                        No drift snapshots yet — the weekly reconciliation job runs every Monday.
+                        <BellOff className="h-4 w-4 mx-auto mb-2 opacity-50" />
+                        No drift snapshots yet — weekly snapshots start once the
+                        monitoring connectors go live (roadmap, §9.5). Nothing is
+                        simulated here.
                       </div>
                     </div>
                   )}
@@ -270,7 +276,7 @@ export function MonitoringView() {
                             <p className="text-[10px] text-muted-foreground mt-1">{a.category} · {timeAgo(a.createdAt)}</p>
                           </div>
                           {!a.acknowledged && (
-                            <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => ackAlert(m.monitoredProjectId, a.id)}>
+                            <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => ackAlert(a.id)}>
                               Ack
                             </Button>
                           )}

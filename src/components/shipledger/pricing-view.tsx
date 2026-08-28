@@ -34,12 +34,11 @@ const TIERS = [
     features: [
       { label: 'Full evidence report', included: true },
       { label: 'Every finding, full anatomy', included: true },
-      { label: 'Exportable case file (PDF)', included: true },
+      { label: 'Exportable case file (JSON / print-to-PDF)', included: true },
       { label: 'Client-choice: flat or 10%', included: true },
       { label: 'Live connectors', included: false },
     ],
     tone: 'primary' as const,
-    highlight: 'Most chosen',
   },
   {
     id: 'monitoring',
@@ -96,11 +95,6 @@ export function PricingView() {
               key={t.id}
               className={`relative ${primary ? 'border-primary bg-primary/5' : 'border-border'}`}
             >
-              {t.highlight && (
-                <div className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] uppercase tracking-wider font-semibold bg-primary text-primary-foreground px-2.5 py-0.5 rounded-full">
-                  {t.highlight}
-                </div>
-              )}
               <CardContent className="p-5 h-full flex flex-col">
                 <div className="text-xs uppercase tracking-wider text-muted-foreground">{t.name}</div>
                 <div className="mt-2 flex items-baseline gap-1">
@@ -187,7 +181,9 @@ export function PricingView() {
                 <Badge variant="outline" className="text-[10px]">all tiers</Badge>
               </h3>
               <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">
-                Read-only OAuth scopes wherever the provider allows. Tenant-scoped row-level isolation in Postgres. Encryption at rest (KMS) and in transit (TLS). Immutable audit log for every access, review, export, and finding action. No customer data used to train shared models by default. Data minimization: starts with project/financial records only; communications data (Slack/email) later, and only opt-in.
+                <strong className="text-foreground">Shipped today:</strong> immutable audit log on every access, review, export, and finding action; role-based access control (viewer / reviewer / admin); scrypt password hashing with httpOnly JWT sessions; data minimization — project and financial records only, no communications data.
+                <br />
+                <strong className="text-foreground">Planned with the Postgres migration and Phase-2 connectors:</strong> read-only OAuth scopes, row-level tenant isolation, encryption at rest (KMS).
               </p>
             </div>
           </div>

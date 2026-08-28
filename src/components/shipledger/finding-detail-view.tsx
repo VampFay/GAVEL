@@ -95,6 +95,56 @@ export function FindingDetailView() {
     return () => abortRef.current?.abort()
   }, [load])
 
+  // Real export: builds the case file from the LIVE finding record (the
+  // same data this view renders) and downloads it as JSON. Replaces a
+  // dead "PDF export is on the roadmap" card with working actions.
+  const downloadCaseFile = () => {
+    if (!data?.finding) return
+    const f = data.finding
+    const caseFile = {
+      exportedAt: new Date().toISOString(),
+      finding: {
+        id: f.id,
+        type: f.type,
+        title: f.title,
+        summary: f.summary,
+        impactAmount: f.impactAmount,
+        currency: f.contract?.currency ?? 'INR',
+        confidence: f.confidence,
+        confidenceScore: f.confidenceScore,
+        confidenceBreakdown: f.confidenceBreakdown,
+        assessment: f.assessment,
+        recommendedAction: f.recommendedAction,
+        status: f.status,
+        contractClause: f.contractClause,
+        billingState: f.billingState,
+        reviewNotes: f.reviewNotes,
+        createdAt: f.createdAt,
+        reviewedAt: f.reviewedAt,
+      },
+      client: f.project?.client?.name ?? null,
+      project: f.project?.name ?? null,
+      contract: f.contract ? { title: f.contract.title, totalValue: f.contract.totalValue } : null,
+      evidence: f.evidence.map(e => ({
+        evidenceType: e.evidenceType,
+        source: e.source,
+        refId: e.refId,
+        title: e.title,
+        detail: e.detail,
+        timestamp: e.timestamp,
+        weight: e.weight,
+      })),
+    }
+    const blob = new Blob([JSON.stringify(caseFile, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `case-file-${f.type}-${f.id.slice(-8)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success('Case file exported', { description: `${f.evidence.length} evidence records included.` })
+  }
+
   const takeAction = async (action: 'approve' | 'dismiss' | 'escalate') => {
     if (!activeFindingId) return
     setActionLoading(true)
@@ -380,13 +430,26 @@ export function FindingDetailView() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Export case file</CardTitle>
+              <CardDescription>What you bring to the client conversation</CardDescription>
             </CardHeader>
             <CardContent>
               <p className="text-xs text-muted-foreground mb-3">
-                The case file is what you bring to the client conversation — every claim, the contract clause, the delivery evidence, the billing gap.
+                Every claim, the contract clause, the delivery evidence, the billing gap — exported
+                from the live finding record. Two real formats today:
               </p>
-              <p className="text-xs text-muted-foreground italic">
-                PDF export is on the roadmap — see §9.6 of the product plan. Not available in this build.
+              <div className="space-y-2">
+                <Button variant="outline" size="sm" className="w-full justify-start" onClick={downloadCaseFile}>
+                  <FileCheck2 className="h-3.5 w-3.5 mr-1.5" />
+                  Download case file (JSON)
+                </Button>
+                <Button variant="outline" size="sm" className="w-full justify-start" onClick={() => window.print()}>
+                  <FileText className="h-3.5 w-3.5 mr-1.5" />
+                  Print / save as PDF
+                </Button>
+              </div>
+              <p className="mt-3 text-[10px] text-muted-foreground">
+                Print uses the browser’s native print-to-PDF — a branded PDF template is on the
+                roadmap (§9.6). The JSON export is complete and machine-readable today.
               </p>
             </CardContent>
           </Card>

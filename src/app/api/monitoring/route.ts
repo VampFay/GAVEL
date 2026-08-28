@@ -6,19 +6,15 @@ export const dynamic = 'force-dynamic'
 /**
  * GET /api/monitoring
  *
- * Returns monitored projects with their alerts. The previous implementation
- * synthesized a 12-week drift series using `Math.sin(...)` and presented it
- * as real telemetry. That has been removed.
+ * Returns monitored projects with their alerts and weekly drift series.
  *
- * TODO(§9.5 of plan): implement real weekly drift snapshots.
- *   1. Add a `WeeklyDriftSnapshot` model with
- *      `(projectId, weekStart, deliveryHours, billedHours, ratio)`.
- *   2. Run a cron/backfill job that populates it from the connectors.
- *   3. Expose the snapshots via this endpoint.
- *
- * Until that lands, `driftSeries` is an empty array and `hasRealDriftData`
- * is false — the UI renders an honest "no data yet" state instead of fake
- * telemetry.
+ * driftSeries is built from REAL WeeklyDriftSnapshot rows. Nothing here is
+ * synthesized — the previous implementation faked a 12-week drift series
+ * with `Math.sin(...)` and presented it as telemetry; that was removed.
+ * No snapshot writer exists yet (the §9.5 weekly job lands with the
+ * connector phase), so today every project returns an empty series with
+ * hasRealDriftData: false, and the UI renders an honest "no data yet"
+ * state. When the job lands, the charts light up with zero changes here.
  */
 export async function GET() {
   const monitored = await db.monitoredProject.findMany({
@@ -32,23 +28,37 @@ export async function GET() {
         },
       },
       alerts: { orderBy: { createdAt: 'desc' }, take: 50 },
+      // Real snapshot rows, oldest → newest for charting. Take the last 12
+      // weeks (the §9.5 window); ascending order after the desc fetch.
+      driftSnapshots: { orderBy: { weekStart: 'desc' }, take: 12 },
     },
   })
 
-  const series = monitored.map(m => ({
-    monitoredProjectId: m.id,
-    projectId: m.project.id,
-    projectName: m.project.name,
-    clientName: m.project.client.name,
-    contractTitle: m.project.contract?.title ?? null,
-    baseline: m.driftBaseline ?? 1.0,
-    startedAt: m.startedAt,
-    alertsEnabled: m.alertsEnabled,
-    alerts: m.alerts,
-    // Empty until the §9.5 snapshot job lands — do not fake this.
-    driftSeries: [],
-    hasRealDriftData: false,
-  }))
+  const series = monitored.map(m => {
+    const driftSeries = [...m.driftSnapshots]
+      .sort((a, b) => a.weekStart.getTime() - b.weekStart.getTime())
+      .map(s => ({
+        weekLabel: s.weekStart.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+        deliveryToBilling: s.ratio,
+        deliveryHours: s.deliveryHours,
+        billedHours: s.billedHours,
+      }))
+
+    return {
+      monitoredProjectId: m.id,
+      projectId: m.project.id,
+      projectName: m.project.name,
+      clientName: m.project.client.name,
+      contractTitle: m.project.contract?.title ?? null,
+      baseline: m.driftBaseline ?? 1.0,
+      startedAt: m.startedAt,
+      alertsEnabled: m.alertsEnabled,
+      alerts: m.alerts,
+      // Real data only — never synthesized (see header comment).
+      driftSeries,
+      hasRealDriftData: driftSeries.length > 0,
+    }
+  })
 
   return NextResponse.json({ ok: true, monitored: series })
 }

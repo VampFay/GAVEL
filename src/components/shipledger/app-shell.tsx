@@ -154,7 +154,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
-            <span>Read-only OAuth · Tenant-scoped isolation · Immutable audit log · No data used to train shared models</span>
+            <span>Immutable audit log · Role-based access control · Human review on every finding</span>
           </div>
           <div className="text-xs text-muted-foreground">
             © {new Date().getFullYear()} ShipLedger — working name. Placeholder, not locked.

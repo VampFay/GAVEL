@@ -12,17 +12,23 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 /**
- * DANGEROUS endpoint — runs `bun run scripts/seed.ts` which calls deleteMany()
- * on every table before re-inserting demo data.
+ * DANGEROUS endpoint — runs the seed script which calls deleteMany() on
+ * every table (including Users) before re-inserting demo data.
  *
- * Hard guards (preserved from the previous implementation):
+ * Hard guards:
  *   1. Returns 404 in production (NODE_ENV === 'production')
- *   2. Admin-role required (was: SHIPLEDGER_ADMIN_TOKEN env var). The shared
- *      bearer token is gone — see the auth rewrite in src/lib/auth.ts.
+ *   2. Admin-role required (was: SHIPLEDGER_ADMIN_TOKEN env var)
  *   3. Uses execFile (no shell) with explicit arg array — no injection surface
  *   4. Does NOT echo stdout/stderr to the client (info-disclosure)
- *   5. Writes its own audit-log entry at the route layer, attributed to the
- *      verified caller (was: hardcoded `'admin@seed'`).
+ *   5. Writes an audit-log entry attributed to the verified caller.
+ *      NOTE: the seed wipes Users and re-creates them with NEW ids, so the
+ *      actor id captured before the run is stale afterwards. The audit entry
+ *      is written against the POST-SEED user (looked up by email — the demo
+ *      seed recreates the same accounts). If the account no longer exists,
+ *      actorId is null and the email string carries the attribution.
+ *   6. cwd is process.cwd() (was: hardcoded /home/z/my-project — broke any
+ *      deployment rooted elsewhere). Resolves to the app root under both
+ *      `next dev` and the standalone production server.
  */
 export const POST = withErrorHandler(async (req: Request) => {
   // Guard 1: never available in production
@@ -36,16 +42,27 @@ export const POST = withErrorHandler(async (req: Request) => {
 
   try {
     // Guard 3: execFile with arg array, no shell
-    const { stderr } = await execFileAsync(
+    await execFileAsync(
       'bun',
       ['run', 'scripts/seed.ts'],
-      { cwd: '/home/z/my-project', timeout: 60_000, maxBuffer: 1 * 1024 * 1024 }
+      { cwd: process.cwd(), timeout: 60_000, maxBuffer: 1 * 1024 * 1024 }
     )
+  } catch (err: unknown) {
+    // Server-side log with the real error (the client gets a generic
+    // message — no internals leak). The previous implementation swallowed
+    // the error entirely, which hid a real FK bug for multiple rounds.
+    console.error('[api/seed] seed script failed:', err)
+    return NextResponse.json({ ok: false, error: 'seed execution failed' }, { status: 500 })
+  }
 
-    // Guard 5: audit-log entry attributed to the verified caller
+  // Guard 5: audit-log entry attributed to the caller. Users were just
+  // wiped + recreated with new ids — re-resolve by email, fall back to
+  // actorId: null (the email string still records who ran it).
+  try {
+    const freshUser = await db.user.findUnique({ where: { email: actor.email } })
     await db.auditLog.create({
       data: {
-        actorId: actor.id,
+        actorId: freshUser?.id ?? null,
         actor: actor.email,
         action: 'seed',
         entityType: 'system',
@@ -54,16 +71,12 @@ export const POST = withErrorHandler(async (req: Request) => {
         requestId: requestId ?? undefined,
       },
     })
-
-    // Guard 4: only return ok + truncated stderr count, never raw output
-    return NextResponse.json({
-      ok: true,
-      stderrBytes: stderr.length,
-    })
   } catch (err: unknown) {
-    return NextResponse.json(
-      { ok: false, error: err instanceof Error ? 'seed execution failed' : 'unknown error' },
-      { status: 500 }
-    )
+    // The seed itself succeeded — a failed audit append must not turn the
+    // whole request into a 500 (the previous bug did exactly that).
+    console.error('[api/seed] audit-log append failed:', err)
   }
+
+  // Guard 4: only return ok — never raw seed output
+  return NextResponse.json({ ok: true })
 })
