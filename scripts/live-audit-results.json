@@ -1,0 +1,392 @@
+[
+  {
+    "name": "P1 pages :: GET / renders 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P1 pages :: GET / returns real HTML shell",
+    "pass": true,
+    "detail": "len=77410"
+  },
+  {
+    "name": "P1 pages :: GET /login renders 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P1 unauth :: GET /api/health open (no auth)",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P1 unauth :: health payload ok:true",
+    "pass": true,
+    "detail": "{\"ok\":true,\"service\":\"shipledger\",\"version\":\"0.3.0\",\"sha\":null,\"timestamp\":\"2026-09-09T06:58:27.259Z\"}"
+  },
+  {
+    "name": "P1 unauth :: OPTIONS preflight open (non-401)",
+    "pass": true,
+    "detail": "status=204"
+  },
+  {
+    "name": "P1 unauth :: login wrong password → 401",
+    "pass": true,
+    "detail": "expected 401, got 401"
+  },
+  {
+    "name": "P1 unauth :: login unknown email → 401 (generic)",
+    "pass": true,
+    "detail": "expected 401, got 401"
+  },
+  {
+    "name": "P1 unauth :: login malformed email → 400",
+    "pass": true,
+    "detail": "expected 400, got 400"
+  },
+  {
+    "name": "P1 unauth :: GET /api/clients unauth (dev hatch) → 200",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "P1 unauth :: POST /api/clients unauth → 401 (mutations always gated)",
+    "pass": true,
+    "detail": "expected 401, got 401"
+  },
+  {
+    "name": "P1 unauth :: POST reconcile unauth → 401",
+    "pass": true,
+    "detail": "status=401"
+  },
+  {
+    "name": "P1 unauth :: POST /api/seed unauth → 401",
+    "pass": true,
+    "detail": "expected 401, got 401"
+  },
+  {
+    "name": "P1 unauth :: POST /api/extract-contract unauth → 401",
+    "pass": true,
+    "detail": "expected 401, got 401"
+  },
+  {
+    "name": "P2 admin login :: admin login → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P2 admin login :: session cookie issued",
+    "pass": true,
+    "detail": "cookies=shipledger_token"
+  },
+  {
+    "name": "P2 admin login :: GET /api/auth/me → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P2 admin login :: /me reports role=admin",
+    "pass": true,
+    "detail": "expected \"admin\", got \"admin\""
+  },
+  {
+    "name": "P3 GETs (admin) :: GET /api/clients → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P3 GETs (admin) :: clients payload has array",
+    "pass": true,
+    "detail": "count=1"
+  },
+  {
+    "name": "P3 GETs (admin) :: seeded demo client present",
+    "pass": true,
+    "detail": "client=Aetherworks Technologies Pvt Ltd"
+  },
+  {
+    "name": "P3 GETs (admin) :: GET /api/audits → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P3 GETs (admin) :: audits list non-empty",
+    "pass": true,
+    "detail": "keys=ok,audits"
+  },
+  {
+    "name": "P3 GETs (admin) :: GET /api/audits/[id] → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P3 GETs (admin) :: GET /api/findings → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P3 GETs (admin) :: findings list non-empty (seeded)",
+    "pass": true,
+    "detail": "count=5"
+  },
+  {
+    "name": "P3 GETs (admin) :: GET /api/findings/[id] → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P3 GETs (admin) :: finding detail has real fields",
+    "pass": true,
+    "detail": "keys=ok,finding"
+  },
+  {
+    "name": "P3 GETs (admin) :: findings pagination limit=2 respected",
+    "pass": true,
+    "detail": "got=2"
+  },
+  {
+    "name": "P3 GETs (admin) :: GET /api/monitoring → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P3 GETs (admin) :: monitoring has monitored projects",
+    "pass": true,
+    "detail": "monitored=1, alerts=4"
+  },
+  {
+    "name": "P3 GETs (admin) :: GET /api/dashboard → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P3 GETs (admin) :: dashboard payload is object",
+    "pass": true,
+    "detail": "keys=ok,kpis,findingsByType,confidenceBuckets,recoveryByMonth,recentAlerts,recentActi"
+  },
+  {
+    "name": "P3 GETs (admin) :: GET /api/audits/[bad-id] → 404/400 (not 500)",
+    "pass": true,
+    "detail": "status=404"
+  },
+  {
+    "name": "P4 client create :: client create empty name → 400",
+    "pass": true,
+    "detail": "expected 400, got 400"
+  },
+  {
+    "name": "P4 client create :: client create → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 client create :: created client has cuid",
+    "pass": true,
+    "detail": "id=cmttqyrav001xltvf6innmgdv"
+  },
+  {
+    "name": "P4 extract-contract (REAL LLM) :: extract-contract → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 extract-contract (REAL LLM) :: LLM parsed ≥2 milestones",
+    "pass": true,
+    "detail": "milestones=[\"M1\",\"M2\",\"M3\"]"
+  },
+  {
+    "name": "P4 extract-contract (REAL LLM) :: LLM parsed exclusions/out-of-scope",
+    "pass": true,
+    "detail": "exclusions=[{\"clause\":\"5\",\"description\":\"Hosting costs, third-party license fees, and any work beyond the modul"
+  },
+  {
+    "name": "P4 extract-contract (REAL LLM) :: LLM parsed rate card (lineItems)",
+    "pass": true,
+    "detail": "lineItems=4"
+  },
+  {
+    "name": "P4 extract-contract (REAL LLM) :: milestones have real values",
+    "pass": true,
+    "detail": "[\"M1=$48000\",\"M2=$36000\",\"M3=$40000\"]"
+  },
+  {
+    "name": "P4 extract-contract (REAL LLM) :: extract-contract <30 chars → 400",
+    "pass": true,
+    "detail": "expected 400, got 400"
+  },
+  {
+    "name": "P4 reconcile + idempotency :: reconcile probe client (no delivery data) → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 reconcile + idempotency :: honest zero findings for no-delivery client",
+    "pass": true,
+    "detail": "{\"ok\":true,\"created\":0,\"updated\":0,\"skipped\":0,\"adopted\":0,\"ruleStats\":{\"missed_milestone\":{\"scanned\":3,\"considered\":3,\"emitted\":0},\"unbilled_overage\""
+  },
+  {
+    "name": "P4 reconcile + idempotency :: reconcile seeded client run#1 → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 reconcile + idempotency :: reconcile run#2 → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 reconcile + idempotency :: IDEMPOTENCY: run#2 creates 0 new findings",
+    "pass": true,
+    "detail": "expected 0, got 0"
+  },
+  {
+    "name": "P4 finding transitions :: PATCH finding approve → 200 (jb6fjc)",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 finding transitions :: illegal re-approve rejected (4xx, not 200)",
+    "pass": true,
+    "detail": "status=409"
+  },
+  {
+    "name": "P4 finding transitions :: unknown action → 400",
+    "pass": true,
+    "detail": "expected 400, got 400"
+  },
+  {
+    "name": "P4 monitoring :: monitoring toggle off → 200 (ifcojd)",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 monitoring :: monitoring toggle back on → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 monitoring :: toggle missing alertsEnabled → 400",
+    "pass": true,
+    "detail": "expected 400, got 400"
+  },
+  {
+    "name": "P4 monitoring :: GET /api/monitoring/[id] → 200",
+    "pass": true,
+    "detail": "status=200"
+  },
+  {
+    "name": "P4 monitoring :: alert ack → 200 (uah94c)",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 monitoring :: alert unack → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P4 monitoring :: alert re-ack → 200 (leaves it acknowledged)",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P5 viewer role :: viewer login → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P5 viewer role :: viewer /me role=viewer",
+    "pass": true,
+    "detail": "expected \"viewer\", got \"viewer\""
+  },
+  {
+    "name": "P5 viewer role :: viewer can GET clients",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P5 viewer role :: viewer client create → 403",
+    "pass": true,
+    "detail": "expected 403, got 403"
+  },
+  {
+    "name": "P5 viewer role :: viewer finding PATCH → 403",
+    "pass": true,
+    "detail": "expected 403, got 403"
+  },
+  {
+    "name": "P5 viewer role :: viewer extract-contract → 403",
+    "pass": true,
+    "detail": "expected 403, got 403"
+  },
+  {
+    "name": "P5 viewer role :: viewer seed → 403",
+    "pass": true,
+    "detail": "expected 403, got 403"
+  },
+  {
+    "name": "P5 viewer role :: viewer monitoring ack → 403",
+    "pass": true,
+    "detail": "expected 403, got 403"
+  },
+  {
+    "name": "P5 reviewer role :: reviewer login → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P5 reviewer role :: reviewer finding PATCH (escalate) → 200 (allowed role)",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P5 reviewer role :: reviewer client create → 403 (admin-only)",
+    "pass": true,
+    "detail": "expected 403, got 403"
+  },
+  {
+    "name": "P5 reviewer role :: reviewer extract-contract → 403 (admin-only)",
+    "pass": true,
+    "detail": "expected 403, got 403"
+  },
+  {
+    "name": "P5 reviewer role :: reviewer seed → 403 (admin-only)",
+    "pass": true,
+    "detail": "expected 403, got 403"
+  },
+  {
+    "name": "P6 reseed :: POST /api/seed (admin) → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P6 reseed :: seed response ok",
+    "pass": true,
+    "detail": "{\"ok\":true}"
+  },
+  {
+    "name": "P6 reseed :: clients readable after reseed",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P6 reseed :: reseed restored demo findings",
+    "pass": true,
+    "detail": "findings=5"
+  },
+  {
+    "name": "P6 reseed :: probe client wiped by reseed (no residue)",
+    "pass": true,
+    "detail": "residue check"
+  },
+  {
+    "name": "P6 logout :: logout → 200",
+    "pass": true,
+    "detail": "expected 200, got 200"
+  },
+  {
+    "name": "P6 logout :: session invalidated after logout",
+    "pass": true,
+    "detail": "status=401"
+  }
+]
