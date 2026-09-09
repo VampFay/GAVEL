@@ -39,7 +39,9 @@ fi
 echo "== 3. Push =="
 BRANCH=$(git branch --show-current)
 echo "local branch: $BRANCH | HEAD: $(git rev-parse HEAD)"
-git push "$URL" "${BRANCH}:main" 2>&1 | sed "s/${TOKEN}/***/g"
+PUSH_FLAGS=""
+[ "${FORCE:-0}" = "1" ] && PUSH_FLAGS="--force"
+git push $PUSH_FLAGS "$URL" "${BRANCH}:main" 2>&1 | sed "s/${TOKEN}/***/g"
 
 echo "== 4. Verify by SHA =="
 sleep 2
