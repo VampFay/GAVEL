@@ -30,6 +30,7 @@ import {
 } from '@/lib/shipledger'
 import { apiGet } from '@/lib/fetch'
 import { cn } from '@/lib/utils'
+import { CountUp } from './count-up'
 
 interface AuditDetail {
   ok: boolean
@@ -179,15 +180,21 @@ export function AuditDetailView() {
         <div className="grid grid-cols-3 divide-x divide-border">
           <div className="px-4 py-3">
             <div className="micro">Unbilled identified</div>
-            <div className="num text-xl font-semibold text-primary leading-none mt-1">{formatINRCompact(totalImpact)}</div>
+            <div className="num text-xl font-semibold text-primary leading-none mt-1">
+              <CountUp value={totalImpact} format={formatINRCompact} />
+            </div>
           </div>
           <div className="px-4 py-3">
             <div className="micro">Approved</div>
-            <div className="num text-xl font-semibold leading-none mt-1">{formatINRCompact(approvedImpact)}</div>
+            <div className="num text-xl font-semibold leading-none mt-1">
+              <CountUp value={approvedImpact} format={formatINRCompact} />
+            </div>
           </div>
           <div className="px-4 py-3">
             <div className="micro">Contract value</div>
-            <div className="num text-xl font-semibold leading-none mt-1">{formatINRCompact(contract.totalValue)}</div>
+            <div className="num text-xl font-semibold leading-none mt-1">
+              <CountUp value={contract.totalValue} format={formatINRCompact} />
+            </div>
           </div>
         </div>
       </div>
@@ -231,12 +238,12 @@ export function AuditDetailView() {
           {findings.length === 0 && (
             <div className="border border-dashed rounded-md p-6 text-center text-sm text-muted-foreground">No findings yet — run the forensic engine.</div>
           )}
-          <div className="divide-y divide-border border-t border-border">
+          <div className="divide-y divide-border border-t border-border stagger-fast">
           {findings.map(f => {
             const stat = statusColor(f.status)
             const spine = f.status === 'pending_review' ? 'border-l-amber-500' : f.status === 'approved' ? 'border-l-emerald-600' : f.status === 'dismissed' ? 'border-l-stone-400' : 'border-l-rose-500'
             return (
-              <button key={f.id} className={cn('w-full text-left border-l-[3px] py-3 pl-3.5 hover:bg-muted/40 transition-colors', spine)} onClick={() => openFinding(f.id)}>
+              <button key={f.id} className={cn('ledger-row w-full text-left border-l-[3px] py-3 pl-3.5 hover:bg-muted/40 transition-colors', spine)} onClick={() => openFinding(f.id)}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -265,7 +272,7 @@ export function AuditDetailView() {
         </div>
 
         {/* Right column: contract + delivery summary */}
-        <div className="space-y-4">
+        <div className="space-y-4 stagger">
           <Panel title="Contract extraction" icon={<FileText className="h-3.5 w-3.5 text-primary" />} sub="LLM-extracted scope & milestones">
             <div>
               <div className="micro mb-1.5">Milestones</div>

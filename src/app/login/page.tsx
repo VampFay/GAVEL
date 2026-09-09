@@ -66,7 +66,7 @@ export default function LoginPage() {
       <div className="ledger-grid absolute inset-0 opacity-60 [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" aria-hidden="true" />
       <form
         onSubmit={handleSubmit}
-        className="relative w-full max-w-sm space-y-6 rounded-md border bg-card p-8 shadow-sm"
+        className="relative anim-panel-in w-full max-w-sm space-y-6 rounded-md border bg-card p-8 shadow-sm"
       >
         <div className="space-y-1.5 text-center">
           <h1 className="text-xl font-semibold tracking-tight">ShipLedger</h1>

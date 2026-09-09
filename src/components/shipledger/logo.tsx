@@ -7,15 +7,17 @@ interface LogoProps {
   showWordmark?: boolean
   /** Rail variant: brighter inks for the dark sidebar. */
   onRail?: boolean
+  /** Play the ink-draw animation once on mount. */
+  draw?: boolean
 }
 
-export function Logo({ className, showWordmark = true, onRail = false }: LogoProps) {
+export function Logo({ className, showWordmark = true, onRail = false, draw = false }: LogoProps) {
   const primaryClass = onRail ? 'text-sidebar-primary' : 'text-primary'
   const accentClass = onRail ? 'text-[oklch(0.78_0.14_75)]' : 'text-accent-foreground'
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <div className="relative h-8 w-8 shrink-0">
-        <svg viewBox="0 0 32 32" fill="none" className="h-8 w-8">
+        <svg viewBox="0 0 32 32" fill="none" className={cn('h-8 w-8', draw && 'logo-draw anim-logo')}>
           {/* Book / ledger base */}
           <rect x="3" y="6" width="26" height="20" rx="2" fill="currentColor" className={cn(primaryClass, 'opacity-[0.22]')} />
           <rect x="3" y="6" width="26" height="20" rx="2" stroke="currentColor" className={primaryClass} strokeWidth="1.5" />

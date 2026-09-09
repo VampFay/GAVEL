@@ -27,6 +27,7 @@ import {
 } from '@/lib/shipledger'
 import { apiGet } from '@/lib/fetch'
 import { cn } from '@/lib/utils'
+import { CountUp } from './count-up'
 
 interface DashboardData {
   ok: boolean
@@ -124,7 +125,7 @@ export function DashboardView() {
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
       {/* Scope line — the case-file cover note */}
-      <p className="text-sm text-muted-foreground mb-4">
+      <p className="anim-row-in text-sm text-muted-foreground mb-4">
         Forensic recovery across{' '}
         <span className="num font-semibold text-foreground">{k.auditedCount}</span>{' '}
         audited client{k.auditedCount === 1 ? '' : 's'} ·{' '}
@@ -132,12 +133,13 @@ export function DashboardView() {
         project{k.monitoredProjects === 1 ? '' : 's'} under monitoring
       </p>
 
-      {/* KPI band — one instrument strip, hairline-divided */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 border border-border rounded-md divide-x divide-y lg:divide-y-0 divide-border bg-card overflow-hidden">
+      {/* KPI band — one instrument strip, hairline-divided; the money
+          counts up like an adding machine running a tape */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 border border-border rounded-md divide-x divide-y lg:divide-y-0 divide-border bg-card overflow-hidden stagger">
         <KpiCell
           icon={IndianRupee}
           label="Unbilled identified"
-          value={formatINRCompact(k.totalImpact)}
+          value={<CountUp value={k.totalImpact} format={formatINRCompact} />}
           sub={`${formatINR(k.approvedImpact)} approved`}
           tone="primary"
         />
@@ -167,7 +169,7 @@ export function DashboardView() {
       </div>
 
       {/* Charts row */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4 stagger">
         <Panel title="Unbilled recovery — last 6 months" className="lg:col-span-2">
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={data.recoveryByMonth}>
@@ -208,7 +210,7 @@ export function DashboardView() {
       </div>
 
       {/* Findings by type + recent alerts */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4 stagger">
         <Panel title="Findings by type" className="lg:col-span-2">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={data.findingsByType.map(f => ({ ...f, type: findingTypeLabel(f.type) }))} layout="vertical">
@@ -245,7 +247,7 @@ export function DashboardView() {
       <Panel
         title="Immutable audit log"
         icon={<ShieldCheck className="h-3.5 w-3.5 text-primary" />}
-        className="mt-4"
+        className="mt-4 anim-panel-in"
       >
         <div className="divide-y divide-border">
           {data.recentActivity.length === 0 && (
@@ -293,7 +295,7 @@ function KpiCell({
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
-  value: string
+  value: React.ReactNode
   sub?: string
   tone?: 'primary' | 'amber'
   onClick?: () => void

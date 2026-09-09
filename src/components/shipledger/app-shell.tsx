@@ -104,12 +104,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           mobile && 'px-3 py-2.5 text-sm'
         )}
       >
-        <Icon className={cn('h-4 w-4 shrink-0', active ? 'text-sidebar-primary' : 'opacity-70')} />
+        {/* Active ink bar — draws in like a bookmark ribbon */}
+        {active && (
+          <span
+            className="absolute left-0 top-1.5 bottom-1.5 w-[2.5px] rounded-full bg-sidebar-primary"
+            style={{ animation: 'view-in 0.4s var(--ease-paper) both' }}
+            aria-hidden
+          />
+        )}
+        <Icon className={cn('h-4 w-4 shrink-0 transition-transform duration-200 group-hover:-translate-x-px', active ? 'text-sidebar-primary' : 'opacity-70')} />
         <span className="truncate">{item.label}</span>
         {item.view === 'review_queue' && pending != null && pending > 0 && (
           <span
             className={cn(
-              'num ml-auto rounded-sm px-1.5 py-0.5 text-[10px] font-semibold leading-none',
+              'num ml-auto rounded-sm px-1.5 py-0.5 text-[10px] font-semibold leading-none anim-breathe',
               active || mobile
                 ? 'bg-primary/15 text-sidebar-primary'
                 : 'bg-sidebar-accent text-sidebar-primary/90'
@@ -128,9 +136,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex flex-1">
         {/* ── Workbench rail (binder spine) ─────────────────────────── */}
         <aside className="sticky top-0 hidden h-screen w-52 shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
+        {/* Rail logo — the ledger spine inks itself in on first paint */}
           <div className="flex h-14 items-center border-b border-sidebar-border px-3">
             <button onClick={() => setView('dashboard')} className="cursor-pointer" aria-label="Go to case overview">
-              <Logo onRail />
+              <Logo onRail draw />
             </button>
           </div>
 
@@ -243,7 +252,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          <main className="flex-1">{children}</main>
+          <main key={view} className="flex-1 anim-view">{children}</main>
 
           {/* Footer */}
           <footer className="mt-auto border-t border-border bg-muted/30">

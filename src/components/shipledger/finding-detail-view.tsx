@@ -20,6 +20,8 @@ import {
 } from '@/lib/shipledger'
 import { apiGet, apiPatch } from '@/lib/fetch'
 import { cn } from '@/lib/utils'
+import { CountUp } from './count-up'
+import { Stamp } from './stamp'
 
 interface FindingDetail {
   ok: boolean
@@ -253,9 +255,18 @@ export function FindingDetailView() {
             <p className="text-[13px] text-muted-foreground mt-1.5 leading-relaxed max-w-3xl">{f.summary}</p>
           </div>
           <div className="text-right shrink-0">
-            <div className="num text-3xl font-semibold text-primary leading-none">{formatINRCompact(f.impactAmount)}</div>
+            <CountUp
+              value={f.impactAmount}
+              format={n => formatINRCompact(n)}
+              className="num text-3xl font-semibold text-primary leading-none"
+            />
             <div className="micro mt-1">impact identified</div>
             <div className="num text-[10px] text-muted-foreground mt-1">contract: {formatINRCompact(f.contract?.totalValue)}</div>
+            {!isPending && (
+              <div className="mt-3 flex justify-end">
+                <Stamp status={f.status} />
+              </div>
+            )}
           </div>
         </div>
         {/* Context rule: client · project · contract · detected */}
@@ -281,9 +292,9 @@ export function FindingDetailView() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* LEFT: Evidence chain */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-4 stagger">
           <Panel title="Finding anatomy" sub="Baseline → delivery → billing → assessment → recommendation">
-            <ol className="relative">
+            <ol className="relative stagger-fast">
               {/* vertical line */}
               <div className="absolute left-3 top-2 bottom-2 w-px bg-border" aria-hidden />
               {stages.map((s, i) => {
@@ -302,8 +313,8 @@ export function FindingDetailView() {
           </Panel>
 
           <Panel title={`Evidence records (${f.evidence.length})`} sub="Every claim links to a verifiable source">
-            <div className="divide-y divide-border -mx-1 px-1">
-              {f.evidence.map(e => {
+            <div className="scanline divide-y divide-border -mx-1 px-1 stagger-fast">
+              {f.evidence.map((e, i) => {
                 const dot =
                   e.source === 'contract' ? 'bg-emerald-600'
                   : e.source === 'invoice' ? 'bg-amber-500'
@@ -313,6 +324,7 @@ export function FindingDetailView() {
                   <div key={e.id} className="py-3 first:pt-0 last:pb-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className={cn('h-2 w-2 rounded-[2px] shrink-0', dot)} aria-hidden />
+                      <span className="num text-[10px] font-semibold text-muted-foreground">E-{String(i + 1).padStart(2, '0')}</span>
                       <Badge variant="outline" className="text-[10px]">{sourceLabel(e.source)}</Badge>
                       <span className="micro normal-case tracking-normal">{evidenceTypeLabel(e.evidenceType)}</span>
                       {e.refId && <code className="num text-[10px] text-muted-foreground/80">{e.refId}</code>}
@@ -331,7 +343,7 @@ export function FindingDetailView() {
         </div>
 
         {/* RIGHT: Verdict + actions */}
-        <div className="space-y-4">
+        <div className="space-y-4 stagger">
           <Panel title="Confidence decomposition" sub="Explicit rubrics, never one opaque number">
             <div className="space-y-2.5">
               {subScores.map(s => (

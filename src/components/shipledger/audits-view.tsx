@@ -133,14 +133,14 @@ export function AuditsView() {
           <span className="micro text-right">Unbilled</span>
           <span className="micro text-right">Contract value</span>
         </div>
-        <div className="divide-y divide-border">
+        <div className="divide-y divide-border stagger-fast">
           {audits.map(a => {
             const openable = !!(a.contractId && a.projectId)
             return (
               <button
                 key={a.clientId}
                 className={cn(
-                  'w-full text-left px-4 py-3.5 transition-colors',
+                  'ledger-row w-full text-left px-4 py-3.5 transition-colors',
                   openable ? 'cursor-pointer hover:bg-muted/40' : 'cursor-default'
                 )}
                 onClick={() => openable && openAudit(a.clientId)}

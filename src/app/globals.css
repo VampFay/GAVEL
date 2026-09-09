@@ -194,6 +194,350 @@
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   THE HUMAN LAYER — paper, ink, stamps, choreography.
+   Everything below is what makes this feel drawn by a person who has
+   sat with a real case file, not assembled from a component kit.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Paper grain — a fixed, near-invisible tooth over everything ──── */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}
+.dark body::after,
+:is(.dark) body::after {
+  opacity: 0.05;
+}
+
+/* ── Ruled paper — accounting baselines on data surfaces ───────────── */
+.ruled {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 27px,
+    color-mix(in oklch, var(--foreground) 4%, transparent) 27px,
+    color-mix(in oklch, var(--foreground) 4%, transparent) 28px
+  );
+}
+
+/* ── Motion vocabulary ────────────────────────────────────────────────
+   One easing family for entrances (ink settling, not a slide-in): a
+   long soft-out that feels like paper being laid down, and one spring
+   reserved for the stamp. */
+:root {
+  --ease-paper: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-stamp: cubic-bezier(0.34, 1.45, 0.62, 1);
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+@keyframes panel-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+
+/* The verdict: a stamp coming down on the case file. */
+@keyframes stamp-slam {
+  0% {
+    opacity: 0;
+    transform: scale(2.4) rotate(-16deg);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(0.94) rotate(-6deg);
+  }
+  75% {
+    transform: scale(1.04) rotate(-7deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(-6deg);
+  }
+}
+
+/* Section heading — a rule that draws itself left-to-right. */
+@keyframes ink-draw {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes underline-sweep {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+/* The quiet instruments: a live severity dot, an unread badge. */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes ping-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  80%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+/* One slow scan sweep — used sparingly on first load of evidence areas. */
+@keyframes scan-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/* Logo spine ink draw on first paint. */
+@keyframes ink-stroke {
+  from {
+    stroke-dashoffset: 64;
+  }
+}
+
+/* ── Entrance classes ───────────────────────────────────────────────── */
+.anim-row-in {
+  animation: row-in 0.45s var(--ease-paper) both;
+}
+.anim-panel-in {
+  animation: panel-rise 0.5s var(--ease-paper) both;
+}
+.anim-view {
+  animation: view-in 0.32s var(--ease-paper) both;
+}
+.anim-hero-rise {
+  animation: hero-rise 0.7s var(--ease-paper) both;
+}
+
+/* Stagger: any container's children cascade in with a hand-paced
+   rhythm (delays grow then cap — even rows land together, the way a
+   person riffles a stack). */
+.stagger > * {
+  animation: panel-rise 0.5s var(--ease-paper) both;
+}
+.stagger-fast > * {
+  animation: row-in 0.4s var(--ease-paper) both;
+}
+.stagger > *:nth-child(1),
+.stagger-fast > *:nth-child(1) {
+  animation-delay: 0.03s;
+}
+.stagger > *:nth-child(2),
+.stagger-fast > *:nth-child(2) {
+  animation-delay: 0.09s;
+}
+.stagger > *:nth-child(3),
+.stagger-fast > *:nth-child(3) {
+  animation-delay: 0.15s;
+}
+.stagger > *:nth-child(4),
+.stagger-fast > *:nth-child(4) {
+  animation-delay: 0.2s;
+}
+.stagger > *:nth-child(5),
+.stagger-fast > *:nth-child(5) {
+  animation-delay: 0.25s;
+}
+.stagger > *:nth-child(n + 6),
+.stagger-fast > *:nth-child(n + 6) {
+  animation-delay: 0.3s;
+}
+
+/* ── The verdict stamp ────────────────────────────────────────────────
+   Distressed ink, double ring, mono caps. Slam plays when the element
+   enters the DOM (i.e. right after a review action reloads the data). */
+.stamp {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.3em 0.7em 0.28em;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px currentColor, inset 0 0 0 3px transparent;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  line-height: 1;
+  transform: rotate(-6deg);
+  opacity: 0.92;
+  mix-blend-mode: multiply;
+  /* speckled ink — missing mask support just shows a clean stamp */
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='40'%3E%3Cfilter id='r'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='2'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='discrete' tableValues='0 1 1 1 1 1 1 1 1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='120' height='40' filter='url(%23r)'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='40'%3E%3Cfilter id='r'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='2'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='discrete' tableValues='0 1 1 1 1 1 1 1 1'/%3E%3C/filter%3E%3Crect width='120' height='40' filter='url(%23r)'/%3E%3C/svg%3E");
+  -webkit-mask-size: 120px 40px;
+  mask-size: 120px 40px;
+}
+.dark .stamp {
+  mix-blend-mode: normal;
+  opacity: 0.85;
+}
+.stamp-slam {
+  animation: stamp-slam 0.55s var(--ease-stamp) both;
+}
+.stamp-ink {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* ── Ink underline for headings (draws in once) ────────────────────── */
+.ink-rule {
+  position: relative;
+  padding-bottom: 6px;
+}
+.ink-rule::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: currentColor;
+  opacity: 0.85;
+  transform-origin: left;
+  animation: ink-draw 0.7s var(--ease-paper) 0.15s both;
+}
+
+/* Accent word underline — a wide ink swipe, used on hero emphasis. */
+.ink-sweep {
+  position: relative;
+  display: inline-block;
+}
+.ink-sweep::after {
+  content: "";
+  position: absolute;
+  left: -0.06em;
+  right: -0.06em;
+  bottom: 0.02em;
+  height: 0.32em;
+  background: color-mix(in oklch, var(--primary) 30%, transparent);
+  transform-origin: left;
+  animation: underline-sweep 0.8s var(--ease-paper) 0.5s both;
+  z-index: -1;
+  border-radius: 2px;
+}
+
+/* ── Live indicators ────────────────────────────────────────────────── */
+.anim-breathe {
+  animation: breathe 2.6s ease-in-out infinite;
+}
+.anim-ping-ring {
+  position: relative;
+}
+.anim-ping-ring::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  border: 1px solid currentColor;
+  animation: ping-ring 2.2s var(--ease-paper) infinite;
+  pointer-events: none;
+}
+
+/* ── Scan sweep — a one-shot sheen across an evidence region ────────── */
+.scanline {
+  position: relative;
+  overflow: hidden;
+}
+.scanline::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 34%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    color-mix(in oklch, var(--primary) 8%, transparent),
+    transparent
+  );
+  animation: scan-sweep 1.4s var(--ease-paper) 0.2s 1 both;
+  pointer-events: none;
+}
+
+/* ── Ledger row hover: a lift, the spine darkens ───────────────────── */
+.ledger-row {
+  transition:
+    transform 0.18s var(--ease-paper),
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.ledger-row:hover {
+  transform: translateY(-1px);
+}
+
+/* ── Logo ink draw (first paint only) ───────────────────────────────── */
+.logo-draw path,
+.logo-draw line,
+.logo-draw rect {
+  stroke-dasharray: 64;
+  stroke-dashoffset: 0;
+}
+.logo-draw.anim-logo path,
+.logo-draw.anim-logo line,
+.logo-draw.anim-logo rect {
+  animation: ink-stroke 0.9s var(--ease-paper) 0.1s both;
+}
+
+/* ── Button press physics ───────────────────────────────────────────── */
+button:active:not(:disabled) {
+  transform: translateY(0.5px) scale(0.985);
+}
+
+/* ── Reduced motion: everything settles instantly ───────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .anim-ping-ring::after {
+    display: none;
+  }
+}
+
 /* Glow under hero headline */
 .hero-glow::after {
   content: "";

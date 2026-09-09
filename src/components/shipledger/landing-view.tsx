@@ -30,8 +30,8 @@ export function LandingView() {
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
             Forensic delivery-to-billing reconciliation · dev/IT services only
           </div>
-          <h1 className="font-semibold tracking-tight text-4xl md:text-6xl max-w-4xl leading-[1.05]">
-            We found money you already <span className="text-primary">earned</span>.
+          <h1 className="anim-hero-rise font-semibold tracking-tight text-4xl md:text-6xl max-w-4xl leading-[1.05]">
+            We found money you already <span className="text-primary ink-sweep">earned</span>.
           </h1>
           <p className="mt-5 max-w-2xl text-base md:text-lg text-muted-foreground leading-relaxed">
             ShipLedger reads what was contracted in your SOWs, what was actually built in GitHub and Jira,

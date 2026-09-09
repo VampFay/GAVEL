@@ -35,6 +35,7 @@ import {
   formatDate,
 } from '@/lib/shipledger'
 import { apiGet, apiPatch } from '@/lib/fetch'
+import { Stamp } from './stamp'
 
 interface Finding {
   id: string
@@ -216,8 +217,9 @@ export function ReviewQueueView() {
         </div>
       )}
 
-      {/* Ledger — divided rows, one finding per entry */}
-      <div className="divide-y divide-border">
+      {/* Ledger — divided rows, one finding per entry; riffles in like a
+          stack being dealt, each row hover-lifts, verdicts land as stamps */}
+      <div className="divide-y divide-border stagger-fast">
         {filtered.map(f => (
           <FindingRow
             key={f.id}
@@ -271,14 +273,18 @@ function FindingRow({
   const isPending = finding.status === 'pending_review'
 
   return (
-    <article className={cn('relative border-l-[3px] py-4 pl-4 pr-1 md:pl-5', STATUS_SPINE[finding.status] ?? 'border-l-stone-400')}>
+    <article className={cn('relative ledger-row border-l-[3px] py-4 pl-4 pr-1 md:pl-5', STATUS_SPINE[finding.status] ?? 'border-l-stone-400')}>
       {/* Head line: type · status · confidence · assessment · impact */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           <Badge variant="outline" className="text-[10px] font-semibold">{findingTypeLabel(finding.type)}</Badge>
-          <Badge variant="outline" className={cn('text-[10px]', stat.bg, stat.text, stat.border)}>
-            {finding.status.replace('_', ' ')}
-          </Badge>
+          {isPending ? (
+            <Badge variant="outline" className={cn('text-[10px]', stat.bg, stat.text, stat.border)}>
+              {finding.status.replace('_', ' ')}
+            </Badge>
+          ) : (
+            <Stamp status={finding.status} className="-my-1" />
+          )}
           <ConfidenceMeter score={finding.confidenceScore} label={finding.confidence} />
           <span className="text-[11px] text-muted-foreground hidden lg:inline">{assessmentLabel(finding.assessment)}</span>
           {finding.project && (

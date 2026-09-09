@@ -153,7 +153,7 @@ export function MonitoringView() {
       </p>
 
       {/* Console strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 border border-border rounded-md divide-x divide-y lg:divide-y-0 divide-border bg-card overflow-hidden">
+      <div className="grid grid-cols-2 lg:grid-cols-4 border border-border rounded-md divide-x divide-y lg:divide-y-0 divide-border bg-card overflow-hidden stagger">
         <ConsoleCell icon={Activity} label="Projects monitored" value={String(data?.length ?? 0)} tone="primary" />
         <ConsoleCell icon={AlertTriangle} label="Active alerts" value={String(totalAlerts)} tone={totalAlerts > 0 ? 'amber' : undefined} />
         <ConsoleCell icon={AlertCircle} label="Critical" value={String(critical)} tone={critical > 0 ? 'rose' : undefined} />
@@ -171,7 +171,7 @@ export function MonitoringView() {
         </div>
       )}
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 space-y-4 stagger">
         {data?.map(m => {
           const latest = m.driftSeries.at(-1)
           const driftVsBaseline = latest ? latest.deliveryToBilling - m.baseline : 0
@@ -187,7 +187,7 @@ export function MonitoringView() {
                     <span className="text-border">·</span>
                     <span className="truncate max-w-[280px]">{m.contractTitle}</span>
                     {unacked > 0 && (
-                      <span className="rounded-sm bg-rose-500/10 text-rose-600 dark:text-rose-400 px-1.5 py-px normal-case tracking-normal num text-[10px] font-semibold">
+                      <span className="anim-breathe rounded-sm bg-rose-500/10 text-rose-600 dark:text-rose-400 px-1.5 py-px normal-case tracking-normal num text-[10px] font-semibold">
                         {unacked} open
                       </span>
                     )}
@@ -269,7 +269,7 @@ export function MonitoringView() {
                 {/* Alert console */}
                 <div>
                   <div className="micro mb-1.5">Alert log</div>
-                  <div className="max-h-72 overflow-y-auto scrollbar-thin divide-y divide-border border-t border-border" role="log" aria-label={`Alerts for ${m.projectName}`}>
+                  <div className="max-h-72 overflow-y-auto scrollbar-thin divide-y divide-border border-t border-border stagger-fast" role="log" aria-label={`Alerts for ${m.projectName}`}>
                     {m.alerts.length === 0 && (
                       <p className="text-xs text-muted-foreground py-3">No alerts — drift is within baseline.</p>
                     )}
@@ -283,7 +283,7 @@ export function MonitoringView() {
                           spine,
                           a.acknowledged && 'opacity-50'
                         )}>
-                          <Icon className={cn('h-3.5 w-3.5 mt-0.5 shrink-0', tone)} aria-hidden="true" />
+                          <Icon className={cn('h-3.5 w-3.5 mt-0.5 shrink-0', tone, a.severity === 'critical' && !a.acknowledged && 'anim-breathe')} aria-hidden="true" />
                           <div className="flex-1 min-w-0">
                             <p className="text-xs leading-snug">{a.message}</p>
                             <p className="micro mt-0.5">{a.category} · <span className="num lowercase tracking-normal">{timeAgo(a.createdAt)}</span></p>
