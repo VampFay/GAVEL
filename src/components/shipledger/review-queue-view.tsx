@@ -2,12 +2,12 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAppStore } from '@/stores/app-store'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,22 +20,19 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import {
-  ClipboardCheck,
   CheckCircle2,
   XCircle,
   AlertCircle,
   FileText,
   ArrowRight,
   Filter,
-  IndianRupee,
-  Scale,
   RotateCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  formatINR, formatINRCompact, findingTypeLabel,
-  confidenceColor, statusColor, assessmentLabel, recommendedActionLabel,
-  evidenceTypeLabel, sourceLabel, sourceColor, formatDate, timeAgo,
+  formatINRCompact, findingTypeLabel,
+  statusColor, assessmentLabel, recommendedActionLabel,
+  formatDate,
 } from '@/lib/shipledger'
 import { apiGet, apiPatch } from '@/lib/fetch'
 
@@ -55,9 +52,13 @@ interface Finding {
   reviewNotes: string | null
   reviewedAt: string | null
   createdAt: string
-  project: { id: string; name: string } | null
-  contract: { id: string; title: string } | null
-  evidence: Array<{
+  // NOTE: the LIST endpoint (/api/findings) does not return `project`,
+  // `contract`, or `evidence` — only the detail endpoint does. Kept optional
+  // so the types match the actual wire format (this mismatch crashed the
+  // queue in the browser until it was caught by live-render verification).
+  project?: { id: string; name: string } | null
+  contract?: { id: string; title: string } | null
+  evidence?: Array<{
     id: string
     evidenceType: string
     source: string
@@ -66,7 +67,7 @@ interface Finding {
     detail: string | null
     timestamp: string | null
     weight: number | null
-  }>
+  }> | null
 }
 
 type Tab = 'pending_review' | 'approved' | 'dismissed' | 'escalated' | 'all'
@@ -165,12 +166,19 @@ export function ReviewQueueView() {
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Review queue</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {counts.pending_review} pending review · {formatINRCompact(totalImpact)} total identified · the product proposes, humans assert
-          </p>
+      {/* Triage header — stats only; the section title lives in the context bar */}
+      <div className="mb-4 flex items-center gap-4 flex-wrap border-b border-border pb-3">
+        <div className="num text-sm">
+          <span className="font-semibold text-primary">{counts.pending_review}</span>
+          <span className="text-muted-foreground"> pending review</span>
+        </div>
+        <div className="h-3 w-px bg-border hidden sm:block" />
+        <div className="num text-sm">
+          <span className="font-semibold">{formatINRCompact(totalImpact)}</span>
+          <span className="text-muted-foreground"> total identified</span>
+        </div>
+        <div className="ml-auto text-[11px] text-muted-foreground italic hidden sm:block">
+          the product proposes, humans assert
         </div>
       </div>
 
@@ -198,19 +206,20 @@ export function ReviewQueueView() {
       </Tabs>
 
       {filtered.length === 0 && (
-        <Card className="border-dashed">
-          <CardContent className="p-10 text-center">
+        <div className="border border-dashed rounded-md">
+          <div className="p-10 text-center">
             <div className="h-10 w-10 rounded-full bg-muted text-muted-foreground flex items-center justify-center mx-auto mb-3">
               <Filter className="h-4 w-4" />
             </div>
             <p className="text-sm text-muted-foreground">No findings in this state.</p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
-      <div className="space-y-4">
+      {/* Ledger — divided rows, one finding per entry */}
+      <div className="divide-y divide-border">
         {filtered.map(f => (
-          <FindingCard
+          <FindingRow
             key={f.id}
             finding={f}
             onAction={takeAction}
@@ -223,7 +232,34 @@ export function ReviewQueueView() {
   )
 }
 
-function FindingCard({
+/* Status spine: the row's left ink marks where the finding sits in the
+   review lifecycle — pending=amber, approved=emerald, dismissed=stone,
+   escalated=rose. */
+const STATUS_SPINE: Record<string, string> = {
+  pending_review: 'border-l-amber-500',
+  approved: 'border-l-emerald-600',
+  dismissed: 'border-l-stone-400',
+  escalated: 'border-l-rose-500',
+}
+
+/* 4-segment confidence meter — filled segments track the score band. */
+function ConfidenceMeter({ score, label }: { score: number | null; label: string }) {
+  const pct = score == null ? 0 : Math.round(score * 100)
+  const filled = score == null ? 0 : pct >= 85 ? 4 : pct >= 70 ? 3 : pct >= 50 ? 2 : 1
+  const ink = label === 'high' ? 'bg-emerald-600' : label === 'medium' ? 'bg-amber-500' : 'bg-rose-500'
+  return (
+    <span className="inline-flex items-center gap-1.5" title={`Confidence ${label} · ${score != null ? pct + '%' : 'unscored'}`}>
+      <span className="flex gap-[2px]" aria-hidden="true">
+        {[0, 1, 2, 3].map(i => (
+          <span key={i} className={cn('h-2.5 w-1 rounded-[1px]', i < filled ? ink : 'bg-border')} />
+        ))}
+      </span>
+      <span className="num text-[10px] text-muted-foreground">{score != null ? pct + '%' : '—'}</span>
+    </span>
+  )
+}
+
+function FindingRow({
   finding, onAction, actionLoading, onOpen,
 }: {
   finding: Finding
@@ -231,83 +267,74 @@ function FindingCard({
   actionLoading: boolean
   onOpen: () => void
 }) {
-  const conf = confidenceColor(finding.confidence)
   const stat = statusColor(finding.status)
   const isPending = finding.status === 'pending_review'
 
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Badge variant="outline" className={`text-[10px] ${conf.bg} ${conf.text} ${conf.border}`}>
-                {findingTypeLabel(finding.type)}
-              </Badge>
-              <Badge variant="outline" className={`text-[10px] ${stat.bg} ${stat.text} ${stat.border}`}>
-                {finding.status.replace('_', ' ')}
-              </Badge>
-              <Badge variant="outline" className={`text-[10px] ${conf.bg} ${conf.text} ${conf.border}`}>
-                {finding.confidence} · {finding.confidenceScore != null ? (finding.confidenceScore * 100).toFixed(0) + '%' : '—'}
-              </Badge>
-              <Badge variant="outline" className="text-[10px]">
-                <Scale className="h-2.5 w-2.5 mr-0.5" />{assessmentLabel(finding.assessment)}
-              </Badge>
-              {finding.project && (
-                <span className="text-[10px] text-muted-foreground">
-                  {finding.project.name}
-                </span>
-              )}
-            </div>
-            <h3 className="font-medium text-sm mt-2.5 leading-snug">{finding.title}</h3>
-            <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{finding.summary}</p>
-
-            {/* Finding anatomy — the case-file skeleton */}
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
-              <AnatomyRow label="Commercial baseline" value={finding.contractClause} />
-              <AnatomyRow label="Billing state" value={finding.billingState} />
-              <AnatomyRow label="Recommended" value={recommendedActionLabel(finding.recommendedAction)} />
-              <AnatomyRow label="Reviewed" value={finding.reviewedAt ? formatDate(finding.reviewedAt) : null} />
-            </div>
-          </div>
-
-          <div className="text-right shrink-0">
-            <div className="text-2xl font-semibold text-primary leading-none">{formatINRCompact(finding.impactAmount)}</div>
-            <div className="text-[10px] text-muted-foreground mt-1">impact</div>
-          </div>
+    <article className={cn('relative border-l-[3px] py-4 pl-4 pr-1 md:pl-5', STATUS_SPINE[finding.status] ?? 'border-l-stone-400')}>
+      {/* Head line: type · status · confidence · assessment · impact */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <Badge variant="outline" className="text-[10px] font-semibold">{findingTypeLabel(finding.type)}</Badge>
+          <Badge variant="outline" className={cn('text-[10px]', stat.bg, stat.text, stat.border)}>
+            {finding.status.replace('_', ' ')}
+          </Badge>
+          <ConfidenceMeter score={finding.confidenceScore} label={finding.confidence} />
+          <span className="text-[11px] text-muted-foreground hidden lg:inline">{assessmentLabel(finding.assessment)}</span>
+          {finding.project && (
+            <span className="text-[11px] text-muted-foreground hidden xl:inline truncate">
+              <span className="text-border mx-1">·</span>{finding.project.name}
+            </span>
+          )}
         </div>
+        <div className="text-right shrink-0" aria-label="Impact amount">
+          <div className="num text-xl font-semibold text-foreground leading-none">{formatINRCompact(finding.impactAmount)}</div>
+          <div className="micro mt-1">impact</div>
+        </div>
+      </div>
 
-        {/* Evidence preview */}
-        {finding.evidence.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-border">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Evidence ({finding.evidence.length})</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
-              {finding.evidence.slice(0, 4).map(e => {
-                const sc = sourceColor(e.source)
-                return (
-                  <div key={e.id} className="flex items-start gap-2 p-2 rounded border border-border bg-muted/30">
-                    <Badge variant="outline" className={`text-[9px] shrink-0 ${sc.bg} ${sc.text}`}>{sourceLabel(e.source)}</Badge>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[11px] font-medium truncate">{e.title}</div>
-                      {e.detail && <div className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{e.detail}</div>}
-                      <div className="text-[9px] text-muted-foreground mt-0.5">
-                        {evidenceTypeLabel(e.evidenceType)}
-                        {e.timestamp && ` · ${formatDate(e.timestamp)}`}
-                        {e.weight != null && ` · weight ${(e.weight * 100).toFixed(0)}%`}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+      {/* Body: title + summary — clickable, opens the case file */}
+      <button onClick={onOpen} className="mt-2 block w-full text-left group" aria-label={`Open case file: ${finding.title}`}>
+        <h3 className="text-[13px] font-semibold leading-snug group-hover:text-primary transition-colors">{finding.title}</h3>
+        <p className="mt-1 text-xs text-muted-foreground leading-relaxed line-clamp-2">{finding.summary}</p>
+      </button>
+
+      {/* Anatomy strip — the case-file skeleton */}
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[11px]">
+        <AnatomyCell label="Baseline" value={finding.contractClause} />
+        <AnatomyCell label="Billing" value={finding.billingState} />
+        <AnatomyCell label="Recommended" value={recommendedActionLabel(finding.recommendedAction)} />
+        <AnatomyCell label="Reviewed" value={finding.reviewedAt ? formatDate(finding.reviewedAt) : null} mono />
+      </div>
+
+      {/* Evidence chips — the list endpoint may omit evidence entirely (it is
+          only guaranteed on the detail route), so every access is null-safe */}
+      {(finding.evidence?.length ?? 0) > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="micro mr-0.5">Evidence {finding.evidence?.length}</span>
+            {(finding.evidence ?? []).slice(0, 4).map(e => (
+              <button
+                key={e.id}
+                onClick={onOpen}
+                title={`${e.title}${e.detail ? ` — ${e.detail}` : ''}`}
+                className="inline-flex max-w-[220px] items-center gap-1 rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 hover:border-primary/40 hover:bg-muted/70 transition-colors"
+              >
+                <span className={cn('h-1.5 w-1.5 shrink-0 rounded-[1px]',
+                  e.source === 'contract' ? 'bg-emerald-600'
+                  : e.source === 'invoice' ? 'bg-amber-500'
+                  : e.source === 'jira' || e.source === 'github' ? 'bg-rose-500'
+                  : 'bg-stone-400')} />
+                <span className="text-[10px] truncate">{e.title}</span>
+              </button>
+            ))}
           </div>
         )}
 
-        {/* Actions */}
-        <div className="mt-4 pt-4 border-t border-border flex items-center justify-between flex-wrap gap-2">
-          <Button variant="ghost" size="sm" onClick={onOpen} className="text-primary">
-            <FileText className="h-3.5 w-3.5 mr-1" />
-            Open full case file
+        {/* Actions + notes */}
+        <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
+          <Button variant="ghost" size="sm" onClick={onOpen} className="h-7 px-2 text-primary text-xs">
+            <FileText className="h-3 w-3 mr-1" />
+            Open case file
             <ArrowRight className="h-3 w-3 ml-1" />
           </Button>
           {isPending && (
@@ -410,16 +437,15 @@ function FindingCard({
             </div>
           )}
         </div>
-      </CardContent>
-    </Card>
+    </article>
   )
 }
 
-function AnatomyRow({ label, value }: { label: string; value: string | null | undefined }) {
+function AnatomyCell({ label, value, mono = false }: { label: string; value: string | null | undefined; mono?: boolean }) {
   return (
-    <div className="p-2 rounded border border-border bg-muted/30">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-[11px] leading-snug">{value ?? '—'}</div>
-    </div>
+    <span className="inline-flex items-baseline gap-1.5 min-w-0">
+      <span className="micro">{label}</span>
+      <span className={cn('text-[11px] leading-snug text-foreground/80 truncate max-w-[280px]', mono && 'num')}>{value ?? '—'}</span>
+    </span>
   )
 }

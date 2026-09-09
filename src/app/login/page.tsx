@@ -44,7 +44,11 @@ export default function LoginPage() {
         })
         return
       }
-      // Logged in — send the user to the dashboard.
+      // Logged in — land directly in the workflow (case overview), not
+      // the marketing view. The shell store survives the client-side
+      // navigation, so this sets the entry view for the session.
+      const { useAppStore } = await import('@/stores/app-store')
+      useAppStore.getState().setView('dashboard')
       router.push('/')
       router.refresh()
     } catch (err) {
@@ -57,20 +61,22 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-muted/30 px-4">
+      {/* ledger grid backdrop — the case-file paper */}
+      <div className="ledger-grid absolute inset-0 opacity-60 [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" aria-hidden="true" />
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-6 rounded-xl border bg-card p-8 shadow-sm"
+        className="relative w-full max-w-sm space-y-6 rounded-md border bg-card p-8 shadow-sm"
       >
-        <div className="space-y-2 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">ShipLedger</h1>
-          <p className="text-sm text-muted-foreground">
+        <div className="space-y-1.5 text-center">
+          <h1 className="text-xl font-semibold tracking-tight">ShipLedger</h1>
+          <p className="micro normal-case tracking-[0.08em] text-[11px] font-normal text-muted-foreground">
             Forensic delivery-to-billing reconciliation
           </p>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email" className="micro">Email</Label>
           <Input
             id="email"
             type="email"
@@ -79,11 +85,12 @@ export default function LoginPage() {
             value={email}
             onChange={e => setEmail(e.target.value)}
             disabled={submitting}
+            className="num text-[13px]"
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
+          <Label htmlFor="password" className="micro">Password</Label>
           <Input
             id="password"
             type="password"
@@ -92,15 +99,16 @@ export default function LoginPage() {
             value={password}
             onChange={e => setPassword(e.target.value)}
             disabled={submitting}
+            className="num text-[13px]"
           />
         </div>
 
-        <Button type="submit" className="w-full" disabled={submitting}>
+        <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={submitting}>
           {submitting ? 'Signing in…' : 'Sign in'}
         </Button>
 
-        <p className="text-center text-xs text-muted-foreground">
-          Demo: admin@shipledger.demo / shipledger-admin-demo
+        <p className="num text-center text-[10px] text-muted-foreground/70">
+          demo: admin@shipledger.demo / shipledger-admin-demo
         </p>
       </form>
     </div>
