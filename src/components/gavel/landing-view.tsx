@@ -75,7 +75,7 @@ export function LandingView() {
               Every existing player reads your billing stack. We read your <span className="text-primary">GitHub</span>.
             </h2>
             <p className="mt-4 text-base text-muted-foreground leading-relaxed">
-              Professional-services firms lose an estimated 5–12% of earned revenue to unbilled work, scope creep, and missed milestones — but every existing tool reconciles billing systems only (Stripe, CRM, time-tracking). Software delivery is the one services category that leaves a hard-to-fake, timestamped, third-party-verifiable record of work performed: commits, PRs, ticket state. That data source is the entire differentiation.
+              Industry studies put average revenue leakage at 4–5% of earned revenue, and 42% of professional-services firms report experiencing it (Accelo; MGI Research; Certinia) — yet every existing tool reconciles billing systems only (Stripe, CRM, time-tracking). Software delivery is the one services category that leaves a hard-to-fake, timestamped, third-party-verifiable record of work performed: commits, PRs, ticket state. That data source is the entire differentiation.
             </p>
             <p className="mt-3 text-base text-muted-foreground leading-relaxed">
               Outside dev/IT services, that record doesn&apos;t exist. So the wedge collapses. We stay narrow on purpose.
@@ -138,7 +138,7 @@ export function LandingView() {
           </div>
 
           <div className="mt-6 p-4 rounded-md border border-border bg-card text-sm italic text-muted-foreground">
-            &ldquo;Unlike [X], we don&apos;t touch your billing stack or ask you to migrate anything — we read the GitHub and Jira you already have, and tell you what it says you&apos;re owed.&rdquo;
+            &ldquo;We don&rsquo;t touch your billing stack or ask you to migrate anything — we read the GitHub and Jira you already have, and tell you what it says you&apos;re owed.&rdquo;
           </div>
         </div>
       </section>

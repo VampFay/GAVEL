@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Logo } from '@/components/gavel/logo'
 import { toast } from 'sonner'
 
 /**
@@ -17,7 +18,9 @@ import { toast } from 'sonner'
  * without the Zustand store / theme provider. The shell reads the auth
  * cookie via /api/auth/me on mount and routes to /login if 401.
  *
- * Demo credentials (after running `bun run seed:dev`):
+ * Demo credentials (after running `bun run seed:dev` — the hint below
+ * renders in development builds only; production never advertises
+ * seeded accounts):
  *   admin@gavel.demo    /  gavel-admin-demo
  *   reviewer@gavel.demo /  gavel-reviewer-demo
  *   viewer@gavel.demo   /  gavel-viewer-demo
@@ -68,11 +71,9 @@ export default function LoginPage() {
         onSubmit={handleSubmit}
         className="relative anim-panel-in w-full max-w-sm space-y-6 rounded-md border bg-card p-8 shadow-sm"
       >
-        <div className="space-y-1.5 text-center">
-          <h1 className="text-xl font-semibold tracking-tight">GAVEL</h1>
-          <p className="micro normal-case tracking-[0.08em] text-[11px] font-normal text-muted-foreground">
-            Forensic delivery-to-billing reconciliation
-          </p>
+        <h1 className="sr-only">GAVEL — sign in</h1>
+        <div className="flex justify-center">
+          <Logo draw />
         </div>
 
         <div className="space-y-2">
@@ -107,9 +108,11 @@ export default function LoginPage() {
           {submitting ? 'Signing in…' : 'Sign in'}
         </Button>
 
-        <p className="num text-center text-[10px] text-muted-foreground/70">
-          demo: admin@gavel.demo / gavel-admin-demo
-        </p>
+        {process.env.NODE_ENV === 'development' && (
+          <p className="num text-center text-[10px] text-muted-foreground/70">
+            demo: admin@gavel.demo / gavel-admin-demo
+          </p>
+        )}
       </form>
     </div>
   )

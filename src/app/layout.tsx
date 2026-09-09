@@ -36,11 +36,13 @@ export const metadata: Metadata = {
     description: "Forensic delivery-to-billing reconciliation for dev/IT services firms.",
     siteName: "GAVEL",
     type: "website",
+    images: [{ url: "/og.png", width: 2400, height: 1260, alt: "GAVEL — forensic delivery-to-billing reconciliation" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "GAVEL",
     description: "Forensic delivery-to-billing reconciliation for dev/IT services firms.",
+    images: ["/og.png"],
   },
 };
 

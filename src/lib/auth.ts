@@ -25,9 +25,11 @@ import { getEnv } from './env'
  *     needs SSO, wire `next-auth` with the appropriate provider and replace
  *     `signToken` / `verifyToken` with `getServerSession`.
  *   - Not a refresh-token flow. Tokens last 7 days; re-login on expiry.
- *   - Not CSRF protection for cookie-based auth. SameSite=Strict on the
- *     cookie mitigates the common case; for a server-rendered form, also
- *     add a CSRF token (TODO when adding the login UI form).
+ *   - Not CSRF protection for cookie-based auth. The login form exists
+ *     and posts JSON: SameSite=Strict + JSON-only bodies + no CORS close
+ *     the CSRF surface for this architecture (rationale documented in
+ *     src/lib/auth-cookie.ts). Server-rendered HTML forms, if ever added,
+ *     would need a double-submit token.
  */
 
 const TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60 // 7 days

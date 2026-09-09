@@ -262,7 +262,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <span>Immutable audit log · Role-based access control · Human review on every finding</span>
               </div>
               <div>
-                © {new Date().getFullYear()} GAVEL — working name. Placeholder, not locked.
+                © {new Date().getFullYear()} GAVEL · Forensic reconciliation for dev/IT services
               </div>
             </div>
           </footer>

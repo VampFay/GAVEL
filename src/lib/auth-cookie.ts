@@ -12,9 +12,17 @@ import { getEnv } from './env'
  *   - Path=/    — sent on every same-origin request
  *   - Max-Age=604800 — 7 days (matches TOKEN_TTL_SECONDS in auth.ts)
  *
- * What this is NOT: a CSRF token. For server-rendered forms, also add a
- * CSRF token (double-submit cookie or session-bound nonce). TODO when
- * adding the actual login UI form.
+ * What this is NOT: a CSRF token. None is needed for the current
+ * architecture, and here is why (documented so this isn't "trust me"):
+ *   1. SameSite=Strict — the browser never attaches this cookie to a
+ *      cross-site request, which is the CSRF primitive itself.
+ *   2. JSON-only bodies — every mutation parses req.text() as JSON and
+ *      rejects anything else; a cross-site <form> can only post
+ *      application/x-www-form-urlencoded / multipart, never JSON with
+ *      our shapes. No CORS headers are emitted, so fetch() from another
+ *      origin dies in preflight.
+ * If server-rendered HTML forms are ever introduced (form-action posts
+ * without JSON), add a double-submit token or session nonce THEN.
  */
 
 const COOKIE_NAME = 'gavel_token'
