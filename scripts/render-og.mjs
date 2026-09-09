@@ -1,13 +1,16 @@
 /**
  * Renders scripts/og-card.html → public/og.png (1200×630 @2x = 2400×1260).
- * Run: node scripts/render-og.js
+ * Run: node scripts/render-og.mjs
  * Uses Playwright chromium + Geist from Google Fonts (network required).
  */
-const path = require('path')
-const fs = require('fs')
+import { chromium } from 'playwright'
+import path from 'node:path'
+import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 async function main() {
-  const { chromium } = require('playwright')
   const browser = await chromium.launch()
   const page = await browser.newPage({
     viewport: { width: 1200, height: 630 },
