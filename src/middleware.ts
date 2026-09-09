@@ -39,8 +39,10 @@ import { getEnv } from '@/lib/env'
  *        of this file for the NODE_ENV operational risk.
  *
  * What this is NOT:
- *   - Rate limiting. Add a sliding-window limiter keyed on user-id+IP
- *     before going live (see audit's "Operational basics").
+ *   - Rate limiting. Login brute-force protection lives at the login route
+ *     (sliding window, dual-keyed per IP + per email — src/lib/rate-limit.ts;
+ *     single-process scope by design, swap for Redis before horizontal
+ *     scaling).
  *   - CSRF protection beyond SameSite=Strict on the cookie. For
  *     server-rendered forms, add a CSRF token.
  */

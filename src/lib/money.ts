@@ -11,9 +11,10 @@ import { Prisma } from '@prisma/client'
  *
  * Strategy:
  *   - At the API response boundary, convert Decimal → number with `money()`.
- *     For amounts up to 9,007,199,254,740,991.99 (Number.MAX_SAFE_INTEGER),
- *     this is lossless. A tool tracking INR at 2-decimal precision won't
- *     exceed that.
+ *     Lossless up to 90,071,992,547,409.91 — 2^53/100, the exact safe bound
+ *     for 2-decimal values in IEEE-754 doubles (NOT Number.MAX_SAFE_INTEGER:
+ *     a double cannot represent every hundredth at that magnitude). INR at
+ *     paise precision won't get near this bound.
  *   - For SUM / aggregate arithmetic that needs to avoid float drift, use
  *     `sumMoney()` which accumulates in Decimal.js (bundled with Prisma)
  *     and only converts the final result to a number.

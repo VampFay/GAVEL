@@ -2,6 +2,8 @@
  * Renders scripts/og-card.html → public/og.png (1200×630 @2x = 2400×1260).
  * Run: node scripts/render-og.mjs
  * Uses Playwright chromium + Geist from Google Fonts (network required).
+ * NOTE: playwright is NOT a package.json dependency — the committed
+ * public/og.png is the artifact of record; run this only to regenerate it.
  */
 import { chromium } from 'playwright'
 import path from 'node:path'
