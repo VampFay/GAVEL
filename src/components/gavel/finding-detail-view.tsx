@@ -66,7 +66,7 @@ interface FindingDetail {
 }
 
 export function FindingDetailView() {
-  const { activeFindingId, setView } = useAppStore()
+  const { activeFindingId, setView, triggerVerdictFlash } = useAppStore()
   const [data, setData] = useState<FindingDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -147,6 +147,13 @@ export function FindingDetailView() {
     toast.success('Case file exported', { description: `${f.evidence.length} evidence records included.` })
   }
 
+  /* Map the review action to its stamped status for the verdict flash. */
+  const FLASH_STATUS = {
+    approve: 'approved',
+    dismiss: 'dismissed',
+    escalate: 'escalated',
+  } as const
+
   const takeAction = async (action: 'approve' | 'dismiss' | 'escalate') => {
     if (!activeFindingId) return
     setActionLoading(true)
@@ -158,6 +165,8 @@ export function FindingDetailView() {
     if (e) {
       toast.error('Action failed', { description: e.message })
     } else if (d) {
+      // The ruling lands: stamp flash + table thud, then the toast.
+      triggerVerdictFlash(FLASH_STATUS[action])
       toast.success(`Finding ${action}d`)
       load()
     }
@@ -167,8 +176,8 @@ export function FindingDetailView() {
   if (loading || !data) {
     return (
       <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true">
-        <Skeleton className="h-12 w-full rounded-md" />
-        <Skeleton className="h-72 w-full rounded-md" />
+        <Skeleton className="skeleton-ink h-12 w-full rounded-md" />
+        <Skeleton className="skeleton-ink h-72 w-full rounded-md" />
       </div>
     )
   }
@@ -295,8 +304,8 @@ export function FindingDetailView() {
         <div className="lg:col-span-2 space-y-4 stagger">
           <Panel title="Finding anatomy" sub="Baseline → delivery → billing → assessment → recommendation">
             <ol className="relative stagger-fast">
-              {/* vertical line */}
-              <div className="absolute left-3 top-2 bottom-2 w-px bg-border" aria-hidden />
+              {/* vertical spine — draws top-to-bottom like a ruling pen */}
+              <div className="anim-timeline absolute left-3 top-2 bottom-2 w-px bg-border" aria-hidden />
               {stages.map((s, i) => {
                 const Icon = s.icon
                 return (
@@ -346,16 +355,17 @@ export function FindingDetailView() {
         <div className="space-y-4 stagger">
           <Panel title="Confidence decomposition" sub="Explicit rubrics, never one opaque number">
             <div className="space-y-2.5">
-              {subScores.map(s => (
+              {subScores.map((s, i) => (
                 <div key={s.label}>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-muted-foreground">{s.label}</span>
                     <span className="num font-medium">{(s.value * 100).toFixed(0)}%</span>
                   </div>
+                  {/* ink-fill: each pillar rules itself in, staggered */}
                   <div className="h-1.5 bg-muted overflow-hidden rounded-[1px]">
                     <div
-                      className="h-full bg-primary transition-all"
-                      style={{ width: `${s.value * 100}%` }}
+                      className="ink-fill h-full bg-primary"
+                      style={{ width: `${s.value * 100}%`, ['--ink-delay' as string]: `${0.15 + i * 0.12}s` }}
                     />
                   </div>
                 </div>

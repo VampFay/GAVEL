@@ -74,7 +74,7 @@ interface Finding {
 type Tab = 'pending_review' | 'approved' | 'dismissed' | 'escalated' | 'all'
 
 export function ReviewQueueView() {
-  const { openFinding } = useAppStore()
+  const { openFinding, triggerVerdictFlash } = useAppStore()
   const [findings, setFindings] = useState<Finding[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -103,6 +103,13 @@ export function ReviewQueueView() {
     return () => abortRef.current?.abort()
   }, [load])
 
+  /* Map the review action to its stamped status for the verdict flash. */
+  const FLASH_STATUS = {
+    approve: 'approved',
+    dismiss: 'dismissed',
+    escalate: 'escalated',
+  } as const
+
   const takeAction = async (id: string, action: 'approve' | 'dismiss' | 'escalate') => {
     setActionLoading(id)
     const { data: d, error: e } = await apiPatch<{ finding: Finding }>(`/api/findings/${id}`, {
@@ -113,6 +120,8 @@ export function ReviewQueueView() {
     if (e) {
       toast.error('Action failed', { description: e.message })
     } else if (d) {
+      // The ruling lands: stamp flash + table thud, then the toast.
+      triggerVerdictFlash(FLASH_STATUS[action])
       toast.success(`Finding ${action}d`, {
         description: action === 'approve'
           ? 'Moved to approved — eligible for billing.'
@@ -128,8 +137,8 @@ export function ReviewQueueView() {
   if (loading || !findings) {
     return (
       <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true">
-        <Skeleton className="h-12 w-full" />
-        {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 w-full" />)}
+        <Skeleton className="skeleton-ink h-12 w-full" />
+        {[...Array(3)].map((_, i) => <Skeleton key={i} className="skeleton-ink h-40 w-full" />)}
       </div>
     )
   }
@@ -184,7 +193,7 @@ export function ReviewQueueView() {
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mb-4">
-        <TabsList>
+        <TabsList className="tabs-ink">
           <TabsTrigger value="pending_review" className="text-xs">
             Pending ({counts.pending_review})
           </TabsTrigger>
@@ -244,7 +253,8 @@ const STATUS_SPINE: Record<string, string> = {
   escalated: 'border-l-rose-500',
 }
 
-/* 4-segment confidence meter — filled segments track the score band. */
+/* 4-segment confidence meter — filled segments track the score band;
+   slivers pop in sequence like tabs on a folder. */
 function ConfidenceMeter({ score, label }: { score: number | null; label: string }) {
   const pct = score == null ? 0 : Math.round(score * 100)
   const filled = score == null ? 0 : pct >= 85 ? 4 : pct >= 70 ? 3 : pct >= 50 ? 2 : 1
@@ -253,7 +263,11 @@ function ConfidenceMeter({ score, label }: { score: number | null; label: string
     <span className="inline-flex items-center gap-1.5" title={`Confidence ${label} · ${score != null ? pct + '%' : 'unscored'}`}>
       <span className="flex gap-[2px]" aria-hidden="true">
         {[0, 1, 2, 3].map(i => (
-          <span key={i} className={cn('h-2.5 w-1 rounded-[1px]', i < filled ? ink : 'bg-border')} />
+          <span
+            key={i}
+            className={cn('anim-seg h-2.5 w-1 rounded-[1px]', i < filled ? ink : 'bg-border')}
+            style={{ ['--seg-delay' as string]: `${i * 70}ms` }}
+          />
         ))}
       </span>
       <span className="num text-[10px] text-muted-foreground">{score != null ? pct + '%' : '—'}</span>
@@ -323,7 +337,7 @@ function FindingRow({
                 key={e.id}
                 onClick={onOpen}
                 title={`${e.title}${e.detail ? ` — ${e.detail}` : ''}`}
-                className="inline-flex max-w-[220px] items-center gap-1 rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 hover:border-primary/40 hover:bg-muted/70 transition-colors"
+                className="chip-press inline-flex max-w-[220px] items-center gap-1 rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 hover:border-primary/40 hover:bg-muted/70"
               >
                 <span className={cn('h-1.5 w-1.5 shrink-0 rounded-[1px]',
                   e.source === 'contract' ? 'bg-emerald-600'
@@ -338,10 +352,10 @@ function FindingRow({
 
         {/* Actions + notes */}
         <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
-          <Button variant="ghost" size="sm" onClick={onOpen} className="h-7 px-2 text-primary text-xs">
+          <Button variant="ghost" size="sm" onClick={onOpen} className="group h-7 px-2 text-primary text-xs">
             <FileText className="h-3 w-3 mr-1" />
             Open case file
-            <ArrowRight className="h-3 w-3 ml-1" />
+            <ArrowRight className="arrow-nudge h-3 w-3 ml-1" />
           </Button>
           {isPending && (
             <div className="flex gap-2">

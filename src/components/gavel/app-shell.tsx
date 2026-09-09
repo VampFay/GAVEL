@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useAppStore, type View } from '@/stores/app-store'
 import { Logo } from './logo'
 import { ThemeToggle } from './theme-toggle'
+import { VerdictFlash } from './verdict-flash'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -50,10 +51,31 @@ interface Me {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { view, setView, openIntake } = useAppStore()
+  const { view, setView, openIntake, navDir, verdictFlash } = useAppStore()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [drawerClosing, setDrawerClosing] = useState(false)
+  const [thud, setThud] = useState(false)
   const [pending, setPending] = useState<number | null>(null)
   const [me, setMe] = useState<Me['user']>(null)
+
+  /* The table takes the strike: while a verdict flash is up, the whole
+     content column dips 2px and settles — paper absorbing the stamp. */
+  useEffect(() => {
+    if (!verdictFlash) return
+    setThud(true)
+    const t = setTimeout(() => setThud(false), 380)
+    return () => clearTimeout(t)
+  }, [verdictFlash])
+
+  /* Drawer close choreography: play the slide-out, then unmount. */
+  const closeDrawer = () => {
+    if (drawerClosing) return
+    setDrawerClosing(true)
+    setTimeout(() => {
+      setMobileOpen(false)
+      setDrawerClosing(false)
+    }, 250)
+  }
 
   /* Pending-review badge: refreshed on every view change so post-action
      counts stay honest (single SQLite count — cheap enough). */
@@ -91,7 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         key={item.view}
         onClick={() => {
           setView(item.view)
-          if (mobile) setMobileOpen(false)
+          if (mobile) closeDrawer()
         }}
         title={item.description}
         aria-current={active ? 'page' : undefined}
@@ -133,6 +155,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
+      <VerdictFlash />
       <div className="flex flex-1">
         {/* ── Workbench rail (binder spine) ─────────────────────────── */}
         <aside className="sticky top-0 hidden h-screen w-52 shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
@@ -183,7 +206,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </aside>
 
         {/* ── Content column ────────────────────────────────────────── */}
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className={cn('flex min-w-0 flex-1 flex-col', thud && 'thud')}>
           {/* Top context bar */}
           <header className="sticky top-0 z-40 w-full border-b border-border bg-background/90 backdrop-blur-md">
             <div className="flex h-14 items-center gap-2 px-3 md:px-6">
@@ -214,19 +237,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </header>
 
-          {/* Mobile drawer */}
+          {/* Mobile drawer — slides out of the binder, slides back in */}
           {mobileOpen && (
             <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">
               <div
-                className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  'absolute inset-0 bg-black/40 backdrop-blur-sm',
+                  drawerClosing ? 'anim-drawer-backdrop-out' : 'anim-drawer-backdrop',
+                )}
+                onClick={closeDrawer}
               />
-              <div className="absolute left-0 top-0 h-full w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border p-3 flex flex-col gap-1">
+              <div
+                className={cn(
+                  'absolute left-0 top-0 h-full w-64 bg-sidebar text-sidebar-foreground border-r border-sidebar-border p-3 flex flex-col gap-1',
+                  drawerClosing ? 'anim-drawer-out' : 'anim-drawer',
+                )}
+              >
                 <div className="flex items-center justify-between px-1 py-2 mb-2">
                   <Logo onRail />
                   <button
                     className="p-2 rounded-md hover:bg-sidebar-accent"
-                    onClick={() => setMobileOpen(false)}
+                    onClick={closeDrawer}
                     aria-label="Close menu"
                   >
                     <X className="h-4 w-4" />
@@ -242,7 +273,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   className="bg-primary text-primary-foreground"
                   onClick={() => {
                     openIntake()
-                    setMobileOpen(false)
+                    closeDrawer()
                   }}
                 >
                   <ScanSearch className="h-3.5 w-3.5 mr-1.5" />
@@ -252,7 +283,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          <main key={view} className="flex-1 anim-view">{children}</main>
+          {/* Binder page-turn: navigation down the rail enters from the
+              right (forward), back up the rail enters from the left. */}
+          <main
+            key={view}
+            className={cn('flex-1', navDir === 'forward' ? 'anim-view-forward' : 'anim-view-backward')}
+          >
+            {children}
+          </main>
 
           {/* Footer */}
           <footer className="mt-auto border-t border-border bg-muted/30">

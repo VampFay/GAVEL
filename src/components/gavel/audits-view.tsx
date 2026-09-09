@@ -77,8 +77,8 @@ export function AuditsView() {
   if (loading) {
     return (
       <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true">
-        <Skeleton className="h-14 rounded-md" />
-        {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-md" />)}
+        <Skeleton className="skeleton-ink h-14 rounded-md" />
+        {[...Array(3)].map((_, i) => <Skeleton key={i} className="skeleton-ink h-24 w-full rounded-md" />)}
       </div>
     )
   }
@@ -172,11 +172,12 @@ export function AuditsView() {
                       <span className="num text-[11px] text-muted-foreground">{a.findingsCount} findings</span>
                       <span className="num text-[10px] text-muted-foreground/80">{formatINR(a.approvedImpact)} approved</span>
                     </div>
+                    {/* Findings breakdown — segments rule themselves in, in verdict order */}
                     <div className="h-1.5 bg-muted overflow-hidden flex rounded-[1px]">
-                      <div className="bg-emerald-500" style={{ width: `${pct(a.approved, a.findingsCount)}%` }} />
-                      <div className="bg-amber-500" style={{ width: `${pct(a.pendingReview, a.findingsCount)}%` }} />
-                      <div className="bg-rose-500" style={{ width: `${pct(a.escalated, a.findingsCount)}%` }} />
-                      <div className="bg-slate-300 dark:bg-slate-700" style={{ width: `${pct(a.dismissed, a.findingsCount)}%` }} />
+                      <div className="ink-fill bg-emerald-500" style={{ width: `${pct(a.approved, a.findingsCount)}%`, ['--ink-delay' as string]: '0.05s' }} />
+                      <div className="ink-fill bg-amber-500" style={{ width: `${pct(a.pendingReview, a.findingsCount)}%`, ['--ink-delay' as string]: '0.15s' }} />
+                      <div className="ink-fill bg-rose-500" style={{ width: `${pct(a.escalated, a.findingsCount)}%`, ['--ink-delay' as string]: '0.25s' }} />
+                      <div className="ink-fill bg-slate-300 dark:bg-slate-700" style={{ width: `${pct(a.dismissed, a.findingsCount)}%`, ['--ink-delay' as string]: '0.35s' }} />
                     </div>
                     <div className="num mt-1 text-[10px] text-muted-foreground">
                       <span className="text-emerald-600 dark:text-emerald-400">{a.approved}</span> ap

@@ -107,8 +107,8 @@ export function MonitoringView() {
   if (loading) {
     return (
       <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true">
-        <Skeleton className="h-20 rounded-md" />
-        <Skeleton className="h-72 w-full rounded-md" />
+        <Skeleton className="skeleton-ink h-20 rounded-md" />
+        <Skeleton className="skeleton-ink h-72 w-full rounded-md" />
       </div>
     )
   }
@@ -283,7 +283,7 @@ export function MonitoringView() {
                           spine,
                           a.acknowledged && 'opacity-50'
                         )}>
-                          <Icon className={cn('h-3.5 w-3.5 mt-0.5 shrink-0', tone, a.severity === 'critical' && !a.acknowledged && 'anim-breathe')} aria-hidden="true" />
+                          <Icon className={cn('h-3.5 w-3.5 mt-0.5 shrink-0', tone, a.severity === 'critical' && !a.acknowledged && 'anim-breathe-fast')} aria-hidden="true" />
                           <div className="flex-1 min-w-0">
                             <p className="text-xs leading-snug">{a.message}</p>
                             <p className="micro mt-0.5">{a.category} · <span className="num lowercase tracking-normal">{timeAgo(a.createdAt)}</span></p>

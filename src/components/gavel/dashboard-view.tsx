@@ -90,12 +90,12 @@ export function DashboardView() {
   if (loading || !data) {
     return (
       <div className="p-6 max-w-7xl mx-auto" aria-busy="true">
-        <Skeleton className="h-20 rounded-md" />
+        <Skeleton className="skeleton-ink h-20 rounded-md" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-6">
-          <Skeleton className="h-64 rounded-md lg:col-span-2" />
-          <Skeleton className="h-64 rounded-md" />
+          <Skeleton className="skeleton-ink h-64 rounded-md lg:col-span-2" />
+          <Skeleton className="skeleton-ink h-64 rounded-md" />
         </div>
-        <Skeleton className="h-40 rounded-md mt-4" />
+        <Skeleton className="skeleton-ink h-40 rounded-md mt-4" />
       </div>
     )
   }
@@ -243,13 +243,14 @@ export function DashboardView() {
         </Panel>
       </div>
 
-      {/* Audit log — the forensic exhibit */}
+      {/* Audit log — the forensic exhibit; entries riffle in like a
+          stack being dealt */}
       <Panel
         title="Immutable audit log"
         icon={<ShieldCheck className="h-3.5 w-3.5 text-primary" />}
         className="mt-4 anim-panel-in"
       >
-        <div className="divide-y divide-border">
+        <div className="divide-y divide-border stagger-fast">
           {data.recentActivity.length === 0 && (
             <p className="text-xs text-muted-foreground py-2">No activity recorded yet.</p>
           )}

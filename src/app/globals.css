@@ -523,6 +523,294 @@ button:active:not(:disabled) {
   transform: translateY(0.5px) scale(0.985);
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   MOTION SYSTEM v2 — the case file comes alive.
+   Extends the same vocabulary (paper, ink, stamps, the strike):
+   · scroll-reveal       — sections laid on the desk as you read
+   · binder page-turn    — rail navigation flips the case file forward/back
+   · verdict flash+thud  — a ruling lands: stamp slam, table dips, ink settles
+   · ink-fill            — meters and bars fill like ink being ruled in
+   · drawer choreography — the mobile drawer slides like a case folder
+   · paper drift         — the ledger grid is not a dead backdrop
+   All of it is covered by the global reduced-motion guard below.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Scroll reveal — content is laid on the desk when it enters view ── */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.6s var(--ease-paper),
+    transform 0.6s var(--ease-paper);
+  will-change: opacity, transform;
+}
+.reveal-in {
+  opacity: 1;
+  transform: none;
+}
+/* The self-ruling line — a divider that draws itself left-to-right. */
+.rule-ink {
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.9s var(--ease-paper);
+}
+.rule-ink-in {
+  transform: scaleX(1);
+}
+
+/* ── Binder page-turn — directional view transitions ──────────────────
+   The rail is a binder spine: moving deeper into the workflow flips the
+   page forward (enters from the right); moving back flips it back. */
+@keyframes page-forward {
+  from {
+    opacity: 0;
+    transform: translateX(26px);
+  }
+}
+@keyframes page-backward {
+  from {
+    opacity: 0;
+    transform: translateX(-26px);
+  }
+}
+.anim-view-forward {
+  animation: page-forward 0.34s var(--ease-paper) both;
+}
+.anim-view-backward {
+  animation: page-backward 0.34s var(--ease-paper) both;
+}
+
+/* ── Mobile drawer — a case folder sliding out of the binder ────────── */
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@keyframes drawer-out {
+  to {
+    transform: translateX(-100%);
+  }
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes backdrop-out {
+  to {
+    opacity: 0;
+  }
+}
+.anim-drawer {
+  animation: drawer-in 0.34s var(--ease-paper) both;
+}
+.anim-drawer-out {
+  animation: drawer-out 0.26s var(--ease-paper) both;
+}
+.anim-drawer-backdrop {
+  animation: backdrop-in 0.25s ease both;
+}
+.anim-drawer-backdrop-out {
+  animation: backdrop-out 0.26s ease both;
+}
+
+/* ── The verdict flash — a ruling physically lands on the desk ─────────
+   Full-screen, non-blocking, aria-hidden (the toast already speaks).
+   The stamp slams while the whole content column dips 2px — the table
+   taking the strike. */
+@keyframes verdict-pulse {
+  0% {
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes table-thud {
+  0% {
+    transform: translateY(0);
+  }
+  28% {
+    transform: translateY(2px) rotate(0.15deg);
+  }
+  62% {
+    transform: translateY(-0.5px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+.verdict-overlay {
+  animation: verdict-pulse 1.1s var(--ease-paper) both;
+}
+.thud {
+  animation: table-thud 0.32s var(--ease-paper) both;
+}
+/* The courtroom-size stamp for the flash. */
+.stamp-xl {
+  font-size: 22px;
+  padding: 0.4em 0.85em 0.36em;
+  border-width: 3px;
+  letter-spacing: 0.3em;
+  border-radius: 4px;
+}
+
+/* ── Ink fill — meters and bars rule themselves in ──────────────────── */
+@keyframes ink-fill-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+.ink-fill {
+  transform-origin: left;
+  animation: ink-fill-x 0.85s var(--ease-paper) both;
+  animation-delay: var(--ink-delay, 0s);
+}
+/* Confidence meter slivers — pop in sequence, like tabs being pressed. */
+@keyframes seg-pop {
+  from {
+    opacity: 0;
+    transform: scaleY(0.3);
+  }
+}
+.anim-seg {
+  animation: seg-pop 0.32s var(--ease-paper) both;
+  animation-delay: var(--seg-delay, 0s);
+}
+
+/* ── Tab ink — the active tab gets a highlighter stroke, drawn once ──── */
+.tabs-ink [role="tab"] {
+  position: relative;
+}
+.tabs-ink [role="tab"][data-state="active"]::after {
+  content: "";
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--primary);
+  transform-origin: left;
+  animation: ink-draw 0.45s var(--ease-paper) both;
+}
+
+/* ── Paper drift — the ledger grid breathes, 1px/second, seamless ──── */
+@keyframes paper-drift {
+  to {
+    background-position: 64px 64px;
+  }
+}
+.paper-drift {
+  animation: paper-drift 64s linear infinite;
+}
+
+/* ── Ink shimmer — skeletons take a highlighter sweep, not a pulse ──── */
+@keyframes shimmer-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.skeleton-ink {
+  position: relative;
+  overflow: hidden;
+}
+.skeleton-ink::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    100deg,
+    transparent,
+    color-mix(in oklch, var(--foreground) 7%, transparent),
+    transparent
+  );
+  animation: shimmer-sweep 1.7s var(--ease-paper) infinite;
+}
+
+/* ── Gavel strike — the logo is alive under the cursor ─────────────────
+   Hover lifts the mallet; on release it would fall. The impact ticks
+   flare at the strike point. Pure CSS, on the shared Logo markup. */
+.logo-strike .logo-mallet {
+  transition: transform 0.22s var(--ease-stamp);
+  transform-origin: 16px 21.5px;
+}
+.logo-strike:hover .logo-mallet,
+.logo-strike:focus-visible .logo-mallet {
+  transform: rotate(-9deg);
+}
+.logo-strike .logo-tick {
+  transition:
+    opacity 0.22s var(--ease-stamp),
+    transform 0.22s var(--ease-stamp);
+  transform-origin: center;
+}
+.logo-strike:hover .logo-tick,
+.logo-strike:focus-visible .logo-tick {
+  opacity: 1;
+  transform: scale(1.3);
+}
+
+/* ── Evidence chip press — a small stamp press under the cursor ─────── */
+.chip-press {
+  transition:
+    transform 0.16s var(--ease-stamp),
+    border-color 0.16s ease,
+    background-color 0.16s ease;
+}
+.chip-press:hover {
+  transform: rotate(-2deg) scale(1.05);
+}
+
+/* ── Arrow nudge — CTAs that point somewhere, point harder on hover ─── */
+.group:hover .arrow-nudge,
+.group:focus-visible .arrow-nudge {
+  transform: translateX(2px);
+}
+.arrow-nudge {
+  transition: transform 0.2s var(--ease-paper);
+}
+
+/* ── Severity heartbeat — critical breathes twice as fast ───────────── */
+.anim-breathe-fast {
+  animation: breathe 1.3s ease-in-out infinite;
+}
+
+/* ── Anatomy timeline — the spine draws top-to-bottom ───────────────── */
+@keyframes timeline-draw {
+  from {
+    transform: scaleY(0);
+  }
+}
+.anim-timeline {
+  transform-origin: top;
+  animation: timeline-draw 0.8s var(--ease-paper) 0.15s both;
+}
+
+/* ── Theme ink drop (View Transitions API) — the new ink spreads from
+   the toggle in a circle. Old snapshot sits underneath, unmoving. ──── */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 2147483646;
+}
+
 /* ── Reduced motion: everything settles instantly ───────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -534,6 +822,15 @@ button:active:not(:disabled) {
     transition-duration: 0.01ms !important;
   }
   .anim-ping-ring::after {
+    display: none;
+  }
+  .verdict-overlay {
+    display: none;
+  }
+  .paper-drift {
+    animation: none;
+  }
+  .skeleton-ink::after {
     display: none;
   }
 }

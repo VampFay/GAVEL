@@ -29,6 +29,8 @@ const STAMPS: Record<string, { label: string; ink: string }> = {
   },
 }
 
+export { STAMPS }
+
 export function Stamp({
   status,
   slam = true,

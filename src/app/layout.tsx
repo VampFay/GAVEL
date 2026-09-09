@@ -56,6 +56,12 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
+        {/* Scroll-reveal content must not stay hidden for no-JS visitors
+            (crawlers, text browsers, JS disabled): collapse the reveal
+            transforms when scripting is off. */}
+        <noscript>
+          <style>{`.reveal{opacity:1!important;transform:none!important}.rule-ink{transform:none!important}`}</style>
+        </noscript>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
           {children}
           <Toaster position="bottom-right" richColors />

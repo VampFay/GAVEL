@@ -8,14 +8,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 export default function Loading() {
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true" aria-live="polite">
-      <Skeleton className="h-12 w-full" />
-      <Skeleton className="h-4 w-1/3" />
+      <Skeleton className="skeleton-ink h-12 w-full" />
+      <Skeleton className="skeleton-ink h-4 w-1/3" />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-32 w-full" />
+        <Skeleton className="skeleton-ink h-32 w-full" />
+        <Skeleton className="skeleton-ink h-32 w-full" />
+        <Skeleton className="skeleton-ink h-32 w-full" />
       </div>
-      <Skeleton className="h-72 w-full" />
+      <Skeleton className="skeleton-ink h-72 w-full" />
     </div>
   )
 }

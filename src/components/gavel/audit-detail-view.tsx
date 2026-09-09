@@ -114,9 +114,9 @@ export function AuditDetailView() {
   if (loading || !data) {
     return (
       <div className="p-6 max-w-7xl mx-auto space-y-3" aria-busy="true">
-        <Skeleton className="h-12 w-full" />
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-72 w-full" />
+        <Skeleton className="skeleton-ink h-12 w-full" />
+        <Skeleton className="skeleton-ink h-32 w-full" />
+        <Skeleton className="skeleton-ink h-72 w-full" />
       </div>
     )
   }

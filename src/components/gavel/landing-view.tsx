@@ -3,6 +3,7 @@
 import { useAppStore } from '@/stores/app-store'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Reveal, RevealLine } from './reveal'
 import {
   ArrowRight,
   FileText,
@@ -23,7 +24,7 @@ export function LandingView() {
     <div className="relative">
       {/* HERO */}
       <section className="relative overflow-hidden border-b border-border">
-        <div className="absolute inset-0 ledger-grid opacity-50" />
+        <div className="ledger-grid paper-drift absolute inset-0 opacity-50" />
         <div className="absolute inset-0 hero-glow" />
         <div className="relative max-w-7xl mx-auto px-4 md:px-6 py-16 md:py-24 flex flex-col items-center text-center">
           <div className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground mb-6">
@@ -38,18 +39,18 @@ export function LandingView() {
             and what was invoiced — then surfaces the gap as an <strong className="text-foreground">evidence-backed finding</strong> a human can approve and bill.
           </p>
           <div className="mt-7 flex flex-col sm:flex-row gap-3">
-            <Button size="lg" onClick={openIntake} className="bg-primary text-primary-foreground hover:bg-primary/90">
+            <Button size="lg" onClick={openIntake} className="group bg-primary text-primary-foreground hover:bg-primary/90">
               <FileText className="h-4 w-4 mr-1.5" />
               Run an audit
             </Button>
-            <Button size="lg" variant="outline" onClick={() => setView('dashboard')}>
+            <Button size="lg" variant="outline" onClick={() => setView('dashboard')} className="group">
               See a sample case file
-              <ArrowRight className="h-4 w-4 ml-1.5" />
+              <ArrowRight className="arrow-nudge h-4 w-4 ml-1.5" />
             </Button>
           </div>
 
-          {/* Headline metrics */}
-          <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-4xl">
+          {/* Headline metrics — riffle in like a dealt hand */}
+          <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-4xl stagger">
             {[
               { label: 'Target: unbilled identified', value: '₹6.8 L', sub: 'Phase-0 target — not yet measured' },
               { label: 'Target: findings accepted', value: '78%', sub: 'Phase-0 target — not yet measured' },
@@ -69,7 +70,7 @@ export function LandingView() {
       {/* THE WEDGE */}
       <section className="border-b border-border">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-16">
-          <div className="max-w-3xl">
+          <Reveal className="max-w-3xl">
             <p className="text-xs uppercase tracking-[0.16em] text-primary font-semibold mb-3">Why this wedge</p>
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight leading-tight">
               Every existing player reads your billing stack. We read your <span className="text-primary">GitHub</span>.
@@ -80,10 +81,11 @@ export function LandingView() {
             <p className="mt-3 text-base text-muted-foreground leading-relaxed">
               Outside dev/IT services, that record doesn&apos;t exist. So the wedge collapses. We stay narrow on purpose.
             </p>
-          </div>
+            <RevealLine className="mt-6" />
+          </Reveal>
 
           {/* Competitive comparison */}
-          <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Reveal delay={120} className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card className="border-dashed border-border bg-muted/30">
               <CardContent className="p-5">
                 <p className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Existing tools</p>
@@ -135,48 +137,53 @@ export function LandingView() {
                 </ul>
               </CardContent>
             </Card>
-          </div>
+          </Reveal>
 
-          <div className="mt-6 p-4 rounded-md border border-border bg-card text-sm italic text-muted-foreground">
+          <Reveal delay={200} className="mt-6 p-4 rounded-md border border-border bg-card text-sm italic text-muted-foreground">
             &ldquo;We don&rsquo;t touch your billing stack or ask you to migrate anything — we read the GitHub and Jira you already have, and tell you what it says you&apos;re owed.&rdquo;
-          </div>
+          </Reveal>
         </div>
       </section>
 
       {/* THE FLOW */}
       <section className="border-b border-border bg-muted/20">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-16">
-          <div className="max-w-2xl mb-10">
+          <Reveal className="max-w-2xl mb-10">
             <p className="text-xs uppercase tracking-[0.16em] text-primary font-semibold mb-3">How it works</p>
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Reconstruct the delivery-to-billing chain. Surface gaps as evidence, not opinions.</h2>
-          </div>
+          </Reveal>
 
+          {/* The chain: a rule that draws itself across, then the four
+              stages land on it in sequence. */}
+          <RevealLine className="mb-5 hidden md:block" />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {[
               { icon: FileText, title: '1 · Contracts / SOW', desc: 'LLM-assisted extraction of scope items, rate cards, milestones, exclusions, change-order policy. Validated against deterministic rules — dates parse, amounts parse.' },
               { icon: Layers, title: '2 · Normalize & resolve', desc: 'Jira / Linear tickets, GitHub / GitLab PRs, commits, merges — entity-resolved against contract line items by exact reference and deterministic keyword overlap (embedding-based matching lands with the pgvector migration).' },
               { icon: AlertTriangle, title: '3 · Forensic engine', desc: 'Deterministic rules catch missed milestones, unbilled overages, scope-creep language. LLM judgment reserved for ambiguous calls — always routed to human review.' },
               { icon: ClipboardCheck, title: '4 · Human review → case file', desc: 'Decomposed confidence scoring. Approve, dismiss, escalate. Approved findings become the evidence-backed case file you bring to your client.' },
-            ].map(s => {
+            ].map((s, i) => {
               const Icon = s.icon
               return (
-                <Card key={s.title} className="bg-card border-border">
-                  <CardContent className="p-5 h-full flex flex-col">
-                    <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center mb-4">
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <h3 className="font-medium text-sm">{s.title}</h3>
-                    <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{s.desc}</p>
-                  </CardContent>
-                </Card>
+                <Reveal key={s.title} delay={i * 90} className="h-full">
+                  <Card className="bg-card border-border h-full">
+                    <CardContent className="p-5 h-full flex flex-col">
+                      <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center mb-4">
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <h3 className="font-medium text-sm">{s.title}</h3>
+                      <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{s.desc}</p>
+                    </CardContent>
+                  </Card>
+                </Reveal>
               )
             })}
           </div>
 
           <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FlowItem icon={GitBranch} title="Read-only connectors (Phase 2)" body="GitHub App, Atlassian, Linear, QuickBooks, Xero — least-privilege OAuth, independently revocable per provider, read-only scopes. Design goal; connectors ship in Phase 2 — today contracts are pasted and delivery records are ingested directly." />
-            <FlowItem icon={ShieldCheck} title="Tenant isolation (planned)" body="Today: role-based access control and an immutable audit log on every action. Planned with the Postgres migration: row-level tenant isolation and encryption at rest (KMS)." />
-            <FlowItem icon={Activity} title="Continuous monitoring (Phase 3)" body="Always-on reconciliation of active projects. Statistical drift detection on delivery-to-billing ratio. Real-time alerts. Auto-drafted change orders — human-approved, never auto-sent." />
+            <Reveal delay={0}><FlowItem icon={GitBranch} title="Read-only connectors (Phase 2)" body="GitHub App, Atlassian, Linear, QuickBooks, Xero — least-privilege OAuth, independently revocable per provider, read-only scopes. Design goal; connectors ship in Phase 2 — today contracts are pasted and delivery records are ingested directly." /></Reveal>
+            <Reveal delay={90}><FlowItem icon={ShieldCheck} title="Tenant isolation (planned)" body="Today: role-based access control and an immutable audit log on every action. Planned with the Postgres migration: row-level tenant isolation and encryption at rest (KMS)." /></Reveal>
+            <Reveal delay={180}><FlowItem icon={Activity} title="Continuous monitoring (Phase 3)" body="Always-on reconciliation of active projects. Statistical drift detection on delivery-to-billing ratio. Real-time alerts. Auto-drafted change orders — human-approved, never auto-sent." /></Reveal>
           </div>
         </div>
       </section>
@@ -184,18 +191,18 @@ export function LandingView() {
       {/* PRICING TEASER */}
       <section className="border-b border-border">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-16 flex flex-col md:flex-row items-start gap-10">
-          <div className="md:max-w-md">
+          <Reveal className="md:max-w-md">
             <p className="text-xs uppercase tracking-[0.16em] text-primary font-semibold mb-3">Payment wall</p>
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">The free tier shows the number. The audit unlocks the evidence.</h2>
             <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
               Enough to create desire, nothing actionable — you can&apos;t bill a client off a headline figure alone. The audit unlocks the case file you actually bring to the client conversation.
             </p>
-            <Button variant="outline" className="mt-5" onClick={() => setView('pricing')}>
+            <Button variant="outline" className="mt-5 group" onClick={() => setView('pricing')}>
               See all tiers
-              <ArrowRight className="h-4 w-4 ml-1.5" />
+              <ArrowRight className="arrow-nudge h-4 w-4 ml-1.5" />
             </Button>
-          </div>
-          <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
+          </Reveal>
+          <Reveal delay={140} className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
             <PriceTile
               tier="Free diagnostic"
               price="₹0"
@@ -216,7 +223,7 @@ export function LandingView() {
               includes={['Live connectors', 'Real-time alerts', 'Continuous reconciliation']}
               tone="muted"
             />
-          </div>
+          </Reveal>
         </div>
       </section>
 
@@ -224,7 +231,7 @@ export function LandingView() {
       <section className="border-b border-border bg-muted/20">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-16">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-2">
+            <Reveal className="md:col-span-2">
               <p className="text-xs uppercase tracking-[0.16em] text-primary font-semibold mb-3">Built to be falsifiable</p>
               <h2 className="text-2xl md:text-3xl font-semibold tracking-tight leading-tight">
                 We run Phase 0 on three real projects. If fewer than two surface a material, evidence-backed finding the client agrees is real — the premise is false.
@@ -232,17 +239,17 @@ export function LandingView() {
               <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
                 Not the pitch, not the pricing, the <em>premise</em>. Stop and reassess rather than iterate on messaging. Every assumption in the plan is named, and the kill criteria are stated before any tool is built.
               </p>
-            </div>
-            <div className="flex flex-col justify-center gap-3">
+            </Reveal>
+            <Reveal delay={140} className="flex flex-col justify-center gap-3">
               <Button size="lg" onClick={openIntake} className="bg-primary text-primary-foreground hover:bg-primary/90">
                 <FileText className="h-4 w-4 mr-1.5" />
                 Run an audit
               </Button>
-              <Button size="lg" variant="outline" onClick={() => setView('review_queue')}>
+              <Button size="lg" variant="outline" onClick={() => setView('review_queue')} className="group">
                 See the review queue
-                <ArrowRight className="h-4 w-4 ml-1.5" />
+                <ArrowRight className="arrow-nudge h-4 w-4 ml-1.5" />
               </Button>
-            </div>
+            </Reveal>
           </div>
         </div>
       </section>
@@ -276,9 +283,11 @@ function PriceTile({
 }) {
   const primary = tone === 'primary'
   return (
-    <div className={`relative rounded-lg border p-5 ${primary ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}>
+    <div
+      className={`relative rounded-lg border p-5 transition-transform duration-200 hover:-translate-y-0.5 ${primary ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}
+    >
       {highlight && (
-        <div className="absolute -top-2 right-3 text-[10px] uppercase tracking-wider font-semibold bg-primary text-primary-foreground px-2 py-0.5 rounded-full">
+        <div className="anim-breathe absolute -top-2 right-3 text-[10px] uppercase tracking-wider font-semibold bg-primary text-primary-foreground px-2 py-0.5 rounded-full">
           {highlight}
         </div>
       )}
