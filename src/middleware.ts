@@ -21,9 +21,9 @@ import { getEnv } from '@/lib/env'
  * What this middleware does:
  *   1. Stamp `X-Request-Id` on every request (new random if not provided).
  *   2. Verify the auth JWT (cookie OR Authorization: Bearer). On success,
- *      stamp the VERIFIED identity into request headers — `x-shipledger-actor`
- *      (email), `x-shipledger-user-id`, `x-shipledger-role`. CRITICAL:
- *      this OVERWRITES any client-supplied `x-shipledger-actor` header —
+ *      stamp the VERIFIED identity into request headers — `x-gavel-actor`
+ *      (email), `x-gavel-user-id`, `x-gavel-role`. CRITICAL:
+ *      this OVERWRITES any client-supplied `x-gavel-actor` header —
  *      that was the spoofing hole the audit flagged. Route handlers MUST
  *      read these middleware-stamped headers via `getCurrentActor()` /
  *      `getServerActor()` — never the inbound client-supplied header.
@@ -34,7 +34,7 @@ import { getEnv } from '@/lib/env'
  *        Specific mutating actions get tighter `requireRole(...)` checks
  *        in the route handler itself.
  *      - DEV ONLY: unauthenticated GETs pass as 'anonymous' so seeded demo
- *        data stays browsable. Prod (or SHIPLEDGER_REQUIRE_AUTH=true)
+ *        data stays browsable. Prod (or GAVEL_REQUIRE_AUTH=true)
  *        requires auth on every route — see the comment at the bottom
  *        of this file for the NODE_ENV operational risk.
  *
@@ -74,9 +74,9 @@ export async function middleware(req: NextRequest) {
   // ALWAYS overwrite client-supplied actor/userId/role headers — these
   // can ONLY come from a verified JWT (set below). A client sending one
   // in the inbound request gets ignored.
-  requestHeaders.delete('x-shipledger-actor')
-  requestHeaders.delete('x-shipledger-user-id')
-  requestHeaders.delete('x-shipledger-role')
+  requestHeaders.delete('x-gavel-actor')
+  requestHeaders.delete('x-gavel-user-id')
+  requestHeaders.delete('x-gavel-role')
   requestHeaders.set('x-request-id', requestId)
 
   const response = NextResponse.next({
@@ -107,9 +107,9 @@ export async function middleware(req: NextRequest) {
   if (claims) {
     // Stamp the verified identity into request headers — route handlers
     // read these via `getCurrentActor()` / `getServerActor()`.
-    requestHeaders.set('x-shipledger-actor', claims.email)
-    requestHeaders.set('x-shipledger-user-id', claims.sub)
-    requestHeaders.set('x-shipledger-role', claims.role)
+    requestHeaders.set('x-gavel-actor', claims.email)
+    requestHeaders.set('x-gavel-user-id', claims.sub)
+    requestHeaders.set('x-gavel-role', claims.role)
     // Re-create the response with the updated headers (NextResponse.next
     // snapshots headers at construction time; we need to re-build).
     const verified = NextResponse.next({
@@ -127,18 +127,18 @@ export async function middleware(req: NextRequest) {
   // OPERATIONAL RISK (audit v2, finding #3): this dev escape hatch is
   // keyed on NODE_ENV, so it is WORTHLESS if the deploy target doesn't
   // actually set NODE_ENV=production. Two mitigations:
-  //   1. SHIPLEDGER_REQUIRE_AUTH=true forces strict auth regardless of
+  //   1. GAVEL_REQUIRE_AUTH=true forces strict auth regardless of
   //      NODE_ENV — set it on any deploy whose NODE_ENV you don't trust.
   //   2. Warn once per process so a misconfigured deploy is visible in
   //      the logs instead of silently serving anonymous GETs.
   const env = getEnv()
-  const requireAuth = env.NODE_ENV === 'production' || env.SHIPLEDGER_REQUIRE_AUTH === true
+  const requireAuth = env.NODE_ENV === 'production' || env.GAVEL_REQUIRE_AUTH === true
   if (!requireAuth && !MUTATION_METHODS.has(method)) {
     if (!warnedAnonymousGet) {
       warnedAnonymousGet = true
       console.warn(
-        '⚠️  ShipLedger: anonymous GET access is ENABLED (non-production NODE_ENV). ' +
-        'Set NODE_ENV=production — or SHIPLEDGER_REQUIRE_AUTH=true — on every deploy ' +
+        '⚠️  GAVEL: anonymous GET access is ENABLED (non-production NODE_ENV). ' +
+        'Set NODE_ENV=production — or GAVEL_REQUIRE_AUTH=true — on every deploy ' +
         'that serves real client data.'
       )
     }

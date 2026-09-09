@@ -10,17 +10,17 @@ import { toast } from 'sonner'
 /**
  * Minimal login page.
  *
- * Why so plain? Because the real ShipLedger UI lives behind a single-page
- * "AppShell" router (see src/components/shipledger/app-shell.tsx). The
+ * Why so plain? Because the real GAVEL UI lives behind a single-page
+ * "AppShell" router (see src/components/gavel/app-shell.tsx). The
  * login page is intentionally outside that shell so it loads fast even
  * when the rest of the bundle is still downloading, and so it works
  * without the Zustand store / theme provider. The shell reads the auth
  * cookie via /api/auth/me on mount and routes to /login if 401.
  *
  * Demo credentials (after running `bun run seed:dev`):
- *   admin@shipledger.demo    /  shipledger-admin-demo
- *   reviewer@shipledger.demo /  shipledger-reviewer-demo
- *   viewer@shipledger.demo   /  shipledger-viewer-demo
+ *   admin@gavel.demo    /  gavel-admin-demo
+ *   reviewer@gavel.demo /  gavel-reviewer-demo
+ *   viewer@gavel.demo   /  gavel-viewer-demo
  */
 export default function LoginPage() {
   const router = useRouter()
@@ -69,7 +69,7 @@ export default function LoginPage() {
         className="relative anim-panel-in w-full max-w-sm space-y-6 rounded-md border bg-card p-8 shadow-sm"
       >
         <div className="space-y-1.5 text-center">
-          <h1 className="text-xl font-semibold tracking-tight">ShipLedger</h1>
+          <h1 className="text-xl font-semibold tracking-tight">GAVEL</h1>
           <p className="micro normal-case tracking-[0.08em] text-[11px] font-normal text-muted-foreground">
             Forensic delivery-to-billing reconciliation
           </p>
@@ -108,7 +108,7 @@ export default function LoginPage() {
         </Button>
 
         <p className="num text-center text-[10px] text-muted-foreground/70">
-          demo: admin@shipledger.demo / shipledger-admin-demo
+          demo: admin@gavel.demo / gavel-admin-demo
         </p>
       </form>
     </div>

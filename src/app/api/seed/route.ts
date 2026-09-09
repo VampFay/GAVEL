@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
  *
  * Hard guards:
  *   1. Returns 404 in production (NODE_ENV === 'production')
- *   2. Admin-role required (was: SHIPLEDGER_ADMIN_TOKEN env var)
+ *   2. Admin-role required (was: GAVEL_ADMIN_TOKEN env var)
  *   3. Uses execFile (no shell) with explicit arg array — no injection surface
  *   4. Does NOT echo stdout/stderr to the client (info-disclosure)
  *   5. Writes an audit-log entry attributed to the verified caller.

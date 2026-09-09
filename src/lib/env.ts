@@ -13,12 +13,12 @@ import { z } from 'zod'
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-  SHIPLEDGER_JWT_SECRET: z.string().min(32, 'SHIPLEDGER_JWT_SECRET must be >=32 chars').optional(),
+  GAVEL_JWT_SECRET: z.string().min(32, 'GAVEL_JWT_SECRET must be >=32 chars').optional(),
   // Auth fail-safe (audit v2, finding #3): anonymous GET access is a DEV
   // convenience gated on NODE_ENV !== 'production'. If a deploy target
   // doesn't reliably set NODE_ENV=production, set this to 'true' to force
   // the strict (prod) auth behavior regardless of NODE_ENV.
-  SHIPLEDGER_REQUIRE_AUTH: z
+  GAVEL_REQUIRE_AUTH: z
     .enum(['true', 'false'])
     .optional()
     .transform(v => v === 'true'),

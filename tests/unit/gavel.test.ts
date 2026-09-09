@@ -11,7 +11,7 @@ import {
   recommendedActionLabel,
   evidenceTypeLabel,
   sourceLabel,
-} from '../../src/lib/shipledger'
+} from '../../src/lib/gavel'
 
 describe('formatINR', () => {
   it('returns — for null/undefined/NaN', () => {

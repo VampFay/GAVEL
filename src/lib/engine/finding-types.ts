@@ -7,7 +7,7 @@ export type FindingType =
 
 /**
  * Short human-readable label for each finding type (matches the schema's
- * `type` enum and the UI's `findingTypeLabel` in src/lib/shipledger.ts).
+ * `type` enum and the UI's `findingTypeLabel` in src/lib/gavel.ts).
  * Kept here so the engine doesn't depend on the React layer.
  */
 export const FINDING_TYPE_LABELS: Record<FindingType, string> = {

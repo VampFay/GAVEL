@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 /**
- * Centralized Zod schemas for every API request body in ShipLedger.
+ * Centralized Zod schemas for every API request body in GAVEL.
  *
  * Why: the previous routes hand-rolled validation per-endpoint, leading to
  * inconsistent error envelopes, missing checks (e.g. email format, length
@@ -56,7 +56,7 @@ export const PatchFindingSchema = z.object({
   action: FindingAction,
   reviewNotes: z.string().trim().max(10_000).optional(),
   // NOTE: `actor` is taken from the request for now (the middleware will
-  // eventually populate `X-ShipLedger-Actor` from a session). The body
+  // eventually populate `X-Gavel-Actor` from a session). The body
   // value is ignored if a header is present — see src/lib/actor.ts.
   actor: z.string().trim().max(254).optional(),
 })

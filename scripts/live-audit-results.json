@@ -22,7 +22,7 @@
   {
     "name": "P1 unauth :: health payload ok:true",
     "pass": true,
-    "detail": "{\"ok\":true,\"service\":\"shipledger\",\"version\":\"0.3.0\",\"sha\":null,\"timestamp\":\"2026-09-09T07:50:13.944Z\"}"
+    "detail": "{\"ok\":true,\"service\":\"gavel\",\"version\":\"0.3.0\",\"sha\":null,\"timestamp\":\"2026-09-09T07:50:13.944Z\"}"
   },
   {
     "name": "P1 unauth :: OPTIONS preflight open (non-401)",
@@ -77,7 +77,7 @@
   {
     "name": "P2 admin login :: session cookie issued",
     "pass": true,
-    "detail": "cookies=shipledger_token"
+    "detail": "cookies=gavel_token"
   },
   {
     "name": "P2 admin login :: GET /api/auth/me → 200",

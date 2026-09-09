@@ -34,7 +34,7 @@ export function LandingView() {
             We found money you already <span className="text-primary ink-sweep">earned</span>.
           </h1>
           <p className="mt-5 max-w-2xl text-base md:text-lg text-muted-foreground leading-relaxed">
-            ShipLedger reads what was contracted in your SOWs, what was actually built in GitHub and Jira,
+            GAVEL reads what was contracted in your SOWs, what was actually built in GitHub and Jira,
             and what was invoiced — then surfaces the gap as an <strong className="text-foreground">evidence-backed finding</strong> a human can approve and bill.
           </p>
           <div className="mt-7 flex flex-col sm:flex-row gap-3">
@@ -110,7 +110,7 @@ export function LandingView() {
 
             <Card className="border-primary bg-primary/5">
               <CardContent className="p-5">
-                <p className="text-xs uppercase tracking-wider text-primary font-semibold mb-3">ShipLedger</p>
+                <p className="text-xs uppercase tracking-wider text-primary font-semibold mb-3">GAVEL</p>
                 <ul className="space-y-2 text-sm">
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 shrink-0" />

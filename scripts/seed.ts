@@ -1,11 +1,11 @@
-// ShipLedger — seed script
+// GAVEL — seed script
 // Populates realistic demo data representing one audit client + findings.
 
 import { db } from '../src/lib/db'
 import { hashPassword } from '../src/lib/auth'
 
 async function main() {
-  console.log('Seeding ShipLedger demo data...')
+  console.log('Seeding GAVEL demo data...')
 
   // Clean slate — order respects FK dependencies. Includes new tables
   // added during the schema-hardening pass (Milestone, Exclusion, TimeEntry,
@@ -37,12 +37,12 @@ async function main() {
   // auth flow end-to-end in the sandbox. Passwords are hashed with scrypt
   // (see src/lib/auth.ts). DO NOT use these credentials in production —
   // the seeded demo users are deleted on every re-seed.
-  const adminHash = await hashPassword('shipledger-admin-demo')
-  const reviewerHash = await hashPassword('shipledger-reviewer-demo')
-  const viewerHash = await hashPassword('shipledger-viewer-demo')
+  const adminHash = await hashPassword('gavel-admin-demo')
+  const reviewerHash = await hashPassword('gavel-reviewer-demo')
+  const viewerHash = await hashPassword('gavel-viewer-demo')
   await db.user.create({
     data: {
-      email: 'admin@shipledger.demo',
+      email: 'admin@gavel.demo',
       name: 'Demo Admin',
       role: 'admin',
       passwordHash: adminHash,
@@ -50,7 +50,7 @@ async function main() {
   })
   await db.user.create({
     data: {
-      email: 'reviewer@shipledger.demo',
+      email: 'reviewer@gavel.demo',
       name: 'Demo Reviewer',
       role: 'reviewer',
       passwordHash: reviewerHash,
@@ -58,7 +58,7 @@ async function main() {
   })
   await db.user.create({
     data: {
-      email: 'viewer@shipledger.demo',
+      email: 'viewer@gavel.demo',
       name: 'Demo Viewer',
       role: 'viewer',
       passwordHash: viewerHash,

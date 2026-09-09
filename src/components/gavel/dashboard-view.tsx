@@ -24,7 +24,7 @@ import { toast } from 'sonner'
 import {
   formatINRCompact, formatINR, timeAgo, findingTypeLabel,
   confidenceColor,
-} from '@/lib/shipledger'
+} from '@/lib/gavel'
 import { apiGet } from '@/lib/fetch'
 import { cn } from '@/lib/utils'
 import { CountUp } from './count-up'

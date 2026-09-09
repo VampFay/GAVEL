@@ -1,5 +1,5 @@
 /**
- * live-audit.ts — exhaustive live audit of every ShipLedger route + button flow.
+ * live-audit.ts — exhaustive live audit of every GAVEL route + button flow.
  *
  * Runs against a live dev server on :3000. Exercises:
  *   Phase 1  Pages + unauthenticated behavior (dev-mode GET hatch, mutation 401s)
@@ -78,9 +78,9 @@ function eq(a: any, b: any, label: string) {
 }
 
 // ── credentials ────────────────────────────────────────────────────────
-const ADMIN = { email: 'admin@shipledger.demo', password: 'shipledger-admin-demo' }
-const REVIEWER = { email: 'reviewer@shipledger.demo', password: 'shipledger-reviewer-demo' }
-const VIEWER = { email: 'viewer@shipledger.demo', password: 'shipledger-viewer-demo' }
+const ADMIN = { email: 'admin@gavel.demo', password: 'gavel-admin-demo' }
+const REVIEWER = { email: 'reviewer@gavel.demo', password: 'gavel-reviewer-demo' }
+const VIEWER = { email: 'viewer@gavel.demo', password: 'gavel-viewer-demo' }
 
 // realistic SOW text for the real-LLM extraction test
 const SOW_TEXT = `STATEMENT OF WORK — Meridian Health Systems Patient Portal Phase 2
@@ -123,7 +123,7 @@ async function main() {
   const options = await call('OPTIONS', '/api/clients')
   check('OPTIONS preflight open (non-401)', options.status !== 401, `status=${options.status}`)
 
-  const badLogin = await call('POST', '/api/auth/login', { body: { email: 'admin@shipledger.demo', password: 'wrong' } })
+  const badLogin = await call('POST', '/api/auth/login', { body: { email: 'admin@gavel.demo', password: 'wrong' } })
   eq(badLogin.status, 401, 'login wrong password → 401')
   const noUserLogin = await call('POST', '/api/auth/login', { body: { email: 'nobody@x.io', password: 'whatever' } })
   eq(noUserLogin.status, 401, 'login unknown email → 401 (generic)')

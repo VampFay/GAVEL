@@ -43,7 +43,7 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* ShipLedger palette — forensic audit / ledger feel.
+/* GAVEL palette — forensic audit / ledger feel.
    Primary: deep emerald (money, recovery, ledger green).
    Accent: amber (scope creep, warning, attention).
    Danger: rose-red (critical, overdue).

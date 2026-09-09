@@ -1,4 +1,4 @@
-// ShipLedger — Prisma schema
+// GAVEL — Prisma schema
 // Forensic delivery-to-billing reconciliation tool for dev/IT services firms.
 
 // NOTE: provider is sqlite for the dev sandbox. Production should switch to

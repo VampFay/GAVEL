@@ -34,7 +34,7 @@ export function Logo({ className, showWordmark = true, onRail = false, draw = fa
       </div>
       {showWordmark && (
         <div className="flex flex-col leading-none">
-          <span className={cn('font-semibold tracking-tight text-[15px]', onRail && 'text-sidebar-foreground')}>ShipLedger</span>
+          <span className={cn('font-semibold tracking-tight text-[15px]', onRail && 'text-sidebar-foreground')}>GAVEL</span>
           <span className={cn(
             'text-[10px] uppercase tracking-[0.12em]',
             onRail ? 'text-sidebar-foreground/50' : 'text-muted-foreground'

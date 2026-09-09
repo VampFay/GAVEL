@@ -16,7 +16,7 @@ import {
   RotateCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatINR, formatINRCompact, formatDate } from '@/lib/shipledger'
+import { formatINR, formatINRCompact, formatDate } from '@/lib/gavel'
 import { apiGet } from '@/lib/fetch'
 import { cn } from '@/lib/utils'
 

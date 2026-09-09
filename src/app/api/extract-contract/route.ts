@@ -44,7 +44,7 @@ interface ExtractedContract {
   rawNotes: string[]
 }
 
-const SYSTEM_PROMPT = `You are ShipLedger's contract extraction engine. Given a Statement of Work (SOW) or master services contract, extract structured data into a strict JSON schema.
+const SYSTEM_PROMPT = `You are GAVEL's contract extraction engine. Given a Statement of Work (SOW) or master services contract, extract structured data into a strict JSON schema.
 
 Extract:
 - title: the contract/project title

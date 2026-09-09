@@ -16,7 +16,7 @@ import {
   CheckCircle2, ArrowRight, ArrowLeft, Sparkles, X,
   IndianRupee, Building2, AlertCircle,
 } from 'lucide-react'
-import { formatINR, formatDate } from '@/lib/shipledger'
+import { formatINR, formatDate } from '@/lib/gavel'
 
 interface Client {
   id: string

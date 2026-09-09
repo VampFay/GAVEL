@@ -33,7 +33,7 @@ import {
   formatINRCompact, findingTypeLabel,
   statusColor, assessmentLabel, recommendedActionLabel,
   formatDate,
-} from '@/lib/shipledger'
+} from '@/lib/gavel'
 import { apiGet, apiPatch } from '@/lib/fetch'
 import { Stamp } from './stamp'
 

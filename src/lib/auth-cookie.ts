@@ -17,7 +17,7 @@ import { getEnv } from './env'
  * adding the actual login UI form.
  */
 
-const COOKIE_NAME = 'shipledger_token'
+const COOKIE_NAME = 'gavel_token'
 const TTL_SECONDS = 7 * 24 * 60 * 60
 
 export function setAuthCookie(res: NextResponse, token: string): NextResponse {

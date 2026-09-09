@@ -17,7 +17,7 @@ import {
   formatINR, formatINRCompact, formatDateTime, formatDate, findingTypeLabel,
   statusColor, assessmentLabel, recommendedActionLabel,
   evidenceTypeLabel, sourceLabel,
-} from '@/lib/shipledger'
+} from '@/lib/gavel'
 import { apiGet, apiPatch } from '@/lib/fetch'
 import { cn } from '@/lib/utils'
 import { CountUp } from './count-up'

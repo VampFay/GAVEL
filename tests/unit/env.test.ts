@@ -27,35 +27,35 @@ describe('parseEnv', () => {
     const env = parseEnv(base)
     expect(env.DATABASE_URL).toBe('file:../db/custom.db')
     expect(env.NODE_ENV).toBe('development')
-    expect(env.SHIPLEDGER_JWT_SECRET).toBeUndefined()
-    expect(env.SHIPLEDGER_REQUIRE_AUTH).toBe(false)
+    expect(env.GAVEL_JWT_SECRET).toBeUndefined()
+    expect(env.GAVEL_REQUIRE_AUTH).toBe(false)
   })
 
   it('treats empty strings as unset (the .env.example blank-line trap)', () => {
     // This exact record — a verbatim `cp .env.example .env` — used to fail
-    // SHIPLEDGER_JWT_SECRET's min(32) because '' counts as present.
+    // GAVEL_JWT_SECRET's min(32) because '' counts as present.
     const env = parseEnv({
       ...base,
-      SHIPLEDGER_JWT_SECRET: '',
+      GAVEL_JWT_SECRET: '',
       NEXT_PUBLIC_APP_URL: '',
       NEXT_PUBLIC_ENABLE_RESEED: '',
-      SHIPLEDGER_REQUIRE_AUTH: '',
+      GAVEL_REQUIRE_AUTH: '',
     })
-    expect(env.SHIPLEDGER_JWT_SECRET).toBeUndefined()
+    expect(env.GAVEL_JWT_SECRET).toBeUndefined()
     expect(env.NEXT_PUBLIC_APP_URL).toBeUndefined()
     expect(env.NEXT_PUBLIC_ENABLE_RESEED).toBe(false)
-    expect(env.SHIPLEDGER_REQUIRE_AUTH).toBe(false)
+    expect(env.GAVEL_REQUIRE_AUTH).toBe(false)
   })
 
   it('rejects a JWT secret that is set but too short', () => {
     expect(() =>
-      parseEnv({ ...base, SHIPLEDGER_JWT_SECRET: 'short' })
-    ).toThrow(/SHIPLEDGER_JWT_SECRET/)
+      parseEnv({ ...base, GAVEL_JWT_SECRET: 'short' })
+    ).toThrow(/GAVEL_JWT_SECRET/)
   })
 
   it('accepts a properly long JWT secret', () => {
     const secret = 'a'.repeat(32)
-    expect(parseEnv({ ...base, SHIPLEDGER_JWT_SECRET: secret }).SHIPLEDGER_JWT_SECRET).toBe(secret)
+    expect(parseEnv({ ...base, GAVEL_JWT_SECRET: secret }).GAVEL_JWT_SECRET).toBe(secret)
   })
 
   it('requires DATABASE_URL — missing or blank both fail with the same error', () => {
@@ -63,11 +63,11 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ DATABASE_URL: '' })).toThrow(/DATABASE_URL/)
   })
 
-  it('parses SHIPLEDGER_REQUIRE_AUTH strictly', () => {
-    expect(parseEnv({ ...base, SHIPLEDGER_REQUIRE_AUTH: 'true' }).SHIPLEDGER_REQUIRE_AUTH).toBe(true)
-    expect(parseEnv({ ...base, SHIPLEDGER_REQUIRE_AUTH: 'false' }).SHIPLEDGER_REQUIRE_AUTH).toBe(false)
-    expect(() => parseEnv({ ...base, SHIPLEDGER_REQUIRE_AUTH: 'yes' })).toThrow(
-      /SHIPLEDGER_REQUIRE_AUTH/
+  it('parses GAVEL_REQUIRE_AUTH strictly', () => {
+    expect(parseEnv({ ...base, GAVEL_REQUIRE_AUTH: 'true' }).GAVEL_REQUIRE_AUTH).toBe(true)
+    expect(parseEnv({ ...base, GAVEL_REQUIRE_AUTH: 'false' }).GAVEL_REQUIRE_AUTH).toBe(false)
+    expect(() => parseEnv({ ...base, GAVEL_REQUIRE_AUTH: 'yes' })).toThrow(
+      /GAVEL_REQUIRE_AUTH/
     )
   })
 

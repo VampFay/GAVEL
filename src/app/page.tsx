@@ -1,16 +1,16 @@
 'use client'
 
 import { useAppStore } from '@/stores/app-store'
-import { AppShell } from '@/components/shipledger/app-shell'
-import { LandingView } from '@/components/shipledger/landing-view'
-import { DashboardView } from '@/components/shipledger/dashboard-view'
-import { AuditsView } from '@/components/shipledger/audits-view'
-import { AuditDetailView } from '@/components/shipledger/audit-detail-view'
-import { ReviewQueueView } from '@/components/shipledger/review-queue-view'
-import { FindingDetailView } from '@/components/shipledger/finding-detail-view'
-import { MonitoringView } from '@/components/shipledger/monitoring-view'
-import { PricingView } from '@/components/shipledger/pricing-view'
-import { IntakeModal } from '@/components/shipledger/intake-modal'
+import { AppShell } from '@/components/gavel/app-shell'
+import { LandingView } from '@/components/gavel/landing-view'
+import { DashboardView } from '@/components/gavel/dashboard-view'
+import { AuditsView } from '@/components/gavel/audits-view'
+import { AuditDetailView } from '@/components/gavel/audit-detail-view'
+import { ReviewQueueView } from '@/components/gavel/review-queue-view'
+import { FindingDetailView } from '@/components/gavel/finding-detail-view'
+import { MonitoringView } from '@/components/gavel/monitoring-view'
+import { PricingView } from '@/components/gavel/pricing-view'
+import { IntakeModal } from '@/components/gavel/intake-modal'
 
 export default function Home() {
   const { view } = useAppStore()

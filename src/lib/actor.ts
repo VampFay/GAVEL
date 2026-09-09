@@ -5,11 +5,11 @@ import { cookies, headers } from 'next/headers'
  *
  * Auth model (see src/lib/auth.ts):
  *   - Middleware verifies the JWT on every request and stamps the
- *     VERIFIED identity into these headers: `x-shipledger-actor`
- *     (email), `x-shipledger-user-id`, `x-shipledger-role`.
+ *     VERIFIED identity into these headers: `x-gavel-actor`
+ *     (email), `x-gavel-user-id`, `x-gavel-role`.
  *   - `getCurrentActor()` / `getRequestActor()` / `getRequestId()` read
  *     those VERIFIED headers — they never read the client-supplied
- *     `x-shipledger-actor` header. That was the spoofing hole the
+ *     `x-gavel-actor` header. That was the spoofing hole the
  *     audit flagged (the body-fixed `actor` field was closed, but the
  *     header-stamped version had the identical bug one layer down).
  *
@@ -26,10 +26,10 @@ import { cookies, headers } from 'next/headers'
  */
 export async function getCurrentActor(): Promise<string> {
   const h = await headers()
-  // The `x-shipledger-actor` header is set BY MIDDLEWARE from verified
+  // The `x-gavel-actor` header is set BY MIDDLEWARE from verified
   // JWT claims — NOT from a client-supplied header. (Clients can still
   // SEND the header, but middleware overwrites it after JWT verification.)
-  const fromHeader = h.get('x-shipledger-actor')
+  const fromHeader = h.get('x-gavel-actor')
   if (fromHeader && fromHeader.length > 0 && fromHeader.length <= 254) {
     return fromHeader
   }
@@ -42,7 +42,7 @@ export async function getCurrentActor(): Promise<string> {
  */
 export async function getCurrentUserId(): Promise<string | null> {
   const h = await headers()
-  return h.get('x-shipledger-user-id')
+  return h.get('x-gavel-user-id')
 }
 
 /**

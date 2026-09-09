@@ -11,12 +11,12 @@ import { getEnv } from './env'
  *     for future OAuth provider wiring, but for the sandbox / first paying
  *     customer, a Credentials-style flow is fine and much simpler to audit).
  *   - The token payload is `{ sub, email, role, iat, exp }` — signed with
- *     `SHIPLEDGER_JWT_SECRET` (HMAC-SHA256).
+ *     `GAVEL_JWT_SECRET` (HMAC-SHA256).
  *   - Middleware verifies the token on every request and stamps the
- *     VERIFIED identity into request headers (`x-shipledger-actor`,
- *     `x-shipledger-user-id`, `x-shipledger-role`). Route handlers MUST
+ *     VERIFIED identity into request headers (`x-gavel-actor`,
+ *     `x-gavel-user-id`, `x-gavel-role`). Route handlers MUST
  *     read these middleware-stamped headers — never the client-supplied
- *     `x-shipledger-actor` header directly (that was the spoofing hole).
+ *     `x-gavel-actor` header directly (that was the spoofing hole).
  *   - `requireRole(['reviewer','admin'])` gates specific mutations.
  *   - Password hashing uses `scrypt` (built into node:crypto) — slow + salted.
  *
@@ -49,20 +49,20 @@ const ROLE_RANK: Record<UserRole, number> = {
   admin: 2,
 }
 
-/** Throw if SHIPLEDGER_JWT_SECRET is missing or pathologically short. */
+/** Throw if GAVEL_JWT_SECRET is missing or pathologically short. */
 function getJwtSecret(): string {
   const env = getEnv()
-  const secret = process.env.SHIPLEDGER_JWT_SECRET
+  const secret = process.env.GAVEL_JWT_SECRET
   if (!secret || secret.length < 32) {
     if (env.NODE_ENV === 'production') {
       throw new Error(
-        'SHIPLEDGER_JWT_SECRET must be set to a random string of >=32 chars in production'
+        'GAVEL_JWT_SECRET must be set to a random string of >=32 chars in production'
       )
     }
     // Dev fallback: deterministic so the sandbox works out of the box.
     // LOG loud because no real customer data should ever live behind this.
     console.warn(
-      '⚠️  SHIPLEDGER_JWT_SECRET not set (or < 32 chars) — using insecure dev fallback. ' +
+      '⚠️  GAVEL_JWT_SECRET not set (or < 32 chars) — using insecure dev fallback. ' +
       'NEVER deploy this to production.'
     )
     return 'dev-only-DO-NOT-USE-IN-PRODUCTION-000000000000000000'
@@ -192,7 +192,7 @@ export interface VerifiedActor {
  * Read the verified actor from request headers (set by middleware).
  *
  * CRITICAL: middleware only sets these headers if the JWT verified. A
- * client-supplied `x-shipledger-actor` header is ignored — that was the
+ * client-supplied `x-gavel-actor` header is ignored — that was the
  * spoofing hole the audit flagged. If you find code reading actor from
  * the inbound request body or from a header the client controls, that
  * is a bug.
@@ -202,9 +202,9 @@ export interface VerifiedActor {
 export async function getServerActor(): Promise<VerifiedActor | null> {
   const h = await import('next/headers')
   const headersList = await h.headers()
-  const id = headersList.get('x-shipledger-user-id')
-  const email = headersList.get('x-shipledger-actor')
-  const role = headersList.get('x-shipledger-role')
+  const id = headersList.get('x-gavel-user-id')
+  const email = headersList.get('x-gavel-actor')
+  const role = headersList.get('x-gavel-role')
   if (!id || !email || !role) return null
   if (role !== 'viewer' && role !== 'reviewer' && role !== 'admin') return null
   return { id, email, role }

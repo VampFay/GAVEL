@@ -1,10 +1,10 @@
 {
-  "name": "shipledger",
+  "name": "gavel",
   "version": "0.3.0",
   "description": "Forensic delivery-to-billing reconciliation tool for dev/IT services firms.",
   "private": true,
   "license": "UNLICENSED",
-  "author": "ShipLedger",
+  "author": "GAVEL",
   "packageManager": "bun@1.2.0",
   "engines": {
     "bun": ">=1.2.0",

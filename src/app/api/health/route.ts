@@ -16,7 +16,7 @@ export async function GET() {
     await db.$queryRaw`SELECT 1`
     return NextResponse.json({
       ok: true,
-      service: 'shipledger',
+      service: 'gavel',
       version: process.env.npm_package_version ?? '0.0.0',
       sha: process.env.GIT_SHA ?? null,
       timestamp: new Date().toISOString(),
@@ -25,7 +25,7 @@ export async function GET() {
     return NextResponse.json(
       {
         ok: false,
-        service: 'shipledger',
+        service: 'gavel',
         error: err instanceof Error ? 'db unreachable' : 'unknown',
         timestamp: new Date().toISOString(),
       },

@@ -14,7 +14,7 @@ import {
   TrendingUp, TrendingDown, Bell, BellOff, Target, RotateCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { timeAgo } from '@/lib/shipledger'
+import { timeAgo } from '@/lib/gavel'
 import { apiGet, apiPatch } from '@/lib/fetch'
 import { cn } from '@/lib/utils'
 
