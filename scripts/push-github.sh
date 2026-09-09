@@ -8,7 +8,7 @@ cd /home/z/my-project
 : "${GAVEL_GH_TOKEN:?GAVEL_GH_TOKEN env var required}"
 TOKEN="$GAVEL_GH_TOKEN"
 REPO="VampFay/GAVEL"
-URL="https://${TOKEN}@github.com/${REPO}.git"
+URL="https://x-access-token:${TOKEN}@github.com/${REPO}.git"
 CLEAN_URL="https://github.com/${REPO}.git"
 
 echo "== 1. Repo state via API =="
