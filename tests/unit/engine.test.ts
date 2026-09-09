@@ -288,6 +288,70 @@ describe('runEngine — end-to-end against seed-mirroring fixture', () => {
     expect(overage.recommendedAction).toBe('draft_change_order')
   })
 
+  it('unbilled_overage: an UNRELATED signed change order does not suppress the finding', () => {
+    // Regression guard: hasCoveringChangeOrder previously matched ANY
+    // earlier-signed CO (date check only) — a single unrelated CO would
+    // flip a real overage to already_covered + dismiss. Coverage now
+    // requires token overlap with the capped line item as well.
+    const input: EngineInput = {
+      ...baseInput,
+      changeOrders: [
+        {
+          id: 'co9',
+          title: 'UI redesign phase 2',
+          description: 'Refresh the marketing site visuals and copy',
+          value: dec(150000),
+          signedDate: d('2025-06-20'), // before the 2025-06-25 delivery
+        },
+      ],
+    }
+    const out = runEngine(input, { now: NOW })
+    const overage = out.findings.find(f => f.type === 'unbilled_overage')
+    expect(overage).toBeDefined()
+    expect(overage?.assessment).toBe('ambiguous')
+    expect(overage?.recommendedAction).toBe('draft_change_order')
+  })
+
+  it('unbilled_overage: a domain-overlapping CO signed before delivery marks it already_covered', () => {
+    const input: EngineInput = {
+      ...baseInput,
+      changeOrders: [
+        {
+          id: 'co3',
+          title: 'CO-3 — additional legacy patient records migration',
+          description: 'Extends the records migration cap by 40,000 records',
+          value: dec(88000000),
+          signedDate: d('2025-06-20'), // before the 2025-06-25 delivery
+        },
+      ],
+    }
+    const out = runEngine(input, { now: NOW })
+    const overage = out.findings.find(f => f.type === 'unbilled_overage')
+    expect(overage).toBeDefined()
+    expect(overage?.assessment).toBe('already_covered')
+    expect(overage?.recommendedAction).toBe('dismiss')
+  })
+
+  it('unbilled_overage: a domain-overlapping CO signed AFTER delivery does not cover it', () => {
+    const input: EngineInput = {
+      ...baseInput,
+      changeOrders: [
+        {
+          id: 'co4',
+          title: 'CO-4 — additional legacy patient records migration',
+          description: 'Extends the records migration cap by 40,000 records',
+          value: dec(88000000),
+          signedDate: d('2025-06-26'), // AFTER the 2025-06-25 delivery
+        },
+      ],
+    }
+    const out = runEngine(input, { now: NOW })
+    const overage = out.findings.find(f => f.type === 'unbilled_overage')
+    expect(overage).toBeDefined()
+    expect(overage?.assessment).toBe('ambiguous')
+    expect(overage?.recommendedAction).toBe('draft_change_order')
+  })
+
   it('does NOT emit a scope_expansion finding based on the generic word "out"', () => {
     // Exclusion 5.3 ("Content migration beyond record count above is out of scope")
     // previously matched PR #319 ("...out of baseline scope") on the generic

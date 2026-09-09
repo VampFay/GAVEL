@@ -1,6 +1,6 @@
 import type { EngineEvidence, FindingDraft, Rule, RuleContext, RuleResult } from '../types'
 import type { FindingType } from '../finding-types'
-import { detectQuantityCap, extractNumericRange, daysBetween } from '../entity-resolution'
+import { detectQuantityCap, extractNumericRange, daysBetween, sharedTokens } from '../entity-resolution'
 import { stampConfidence, EVIDENCE_WEIGHTS } from '../confidence'
 import { money } from '@/lib/money'
 
@@ -53,11 +53,19 @@ export const unbilledOverageRule: Rule = {
         const [start, end] = range
         if (end <= cap) continue // no overage
 
-        // Was the overage covered by a change order? Check change orders
-        // whose description overlaps with the line item description (deterministic
-        // token overlap; fuzzy matching is the §9.1 embedding half — TODO).
-        const hasCoveringChangeOrder = input.changeOrders.some(co =>
-          co.signedDate && co.signedDate <= activity.timestamp
+        // Was the overage covered by a change order? A change order only
+        // covers the overage if BOTH hold:
+        //   1. signed BEFORE the delivery activity, AND
+        //   2. deterministic token overlap between the change order text
+        //      (title + description) and the capped line item's description —
+        //      an unrelated CO ("UI redesign phase 2") must never suppress a
+        //      records-migration overage. (Fuzzy matching is the §9.1
+        //      embedding half — TODO.)
+        const hasCoveringChangeOrder = input.changeOrders.some(
+          co =>
+            sharedTokens(`${co.title} ${co.description}`, li.description).length > 0 &&
+            co.signedDate != null &&
+            co.signedDate <= activity.timestamp
         )
 
         const overageUnits = end - cap

@@ -7,8 +7,8 @@ import { getEnv } from './env'
  * used to be the only thing between an attacker and the mutating API.
  *
  * Design:
- *   - Hand-rolled HS256 JWT (no new deps — `next-auth` is in package.json
- *     for future OAuth provider wiring, but for the sandbox / first paying
+ *   - Hand-rolled HS256 JWT (zero auth deps — if SSO is ever required,
+ *     add `next-auth` THEN, not before; for the sandbox / first paying
  *     customer, a Credentials-style flow is fine and much simpler to audit).
  *   - The token payload is `{ sub, email, role, iat, exp }` — signed with
  *     `GAVEL_JWT_SECRET` (HMAC-SHA256).

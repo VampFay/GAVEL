@@ -51,9 +51,9 @@ export async function GET(
       name: client.name,
       industry: client.industry,
       sizeBand: client.sizeBand,
-      // NOTE: contactName + contactEmail intentionally omitted pending
-      // auth wiring (PII exposure — see audit P0/P1). Re-add behind a
-      // reviewer/admin role check when next-auth is configured.
+      // NOTE: contactName + contactEmail intentionally omitted on this
+      // any-role GET (PII exposure — see audit P0/P1). Re-add behind
+      // requireRole(['reviewer','admin']) when the UI needs contact details.
     },
     contract: {
       id: contract.id,
