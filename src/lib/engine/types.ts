@@ -150,6 +150,19 @@ export interface EngineEvidence {
    * See src/lib/engine/confidence.ts.
    */
   weight: number
+  /**
+   * How confidently this evidence row is LINKED to the finding's subject.
+   * Only meaningful today for `delivery_record` rows in the milestone rules:
+   *   'strong' — the record explicitly mentions the milestone ID (e.g. "M4"
+   *               in a PR title, boundary-checked).
+   *   'weak'   — the record matched via >= 2-token description overlap only.
+   * Weak rows are capped at WEAK_DELIVERY_WEIGHT_CAP (0.10) in the
+   * confidence composite, so a fuzzy match can no longer lift a finding
+   * into the HIGH bucket that an explicit ID mention earns (see
+   * confidence.ts). Unstamped rows (all other rules) are treated at their
+   * full weight — backward compatible.
+   */
+  matchStrength?: 'strong' | 'weak'
 }
 
 /**

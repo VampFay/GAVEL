@@ -33,6 +33,36 @@ import type {
 
 // ──────────────────────────── Milestone linking ────────────────────────
 
+// Cache of compiled ID-boundary regexes — findMilestoneDelivery loops over
+// every activity × milestone, so we keep one RegExp per needle.
+const idTokenRegexCache = new Map<string, RegExp>()
+
+/**
+ * Match an ID token (e.g. "M4") inside `text` with alphanumeric boundaries.
+ *
+ * Why not plain `includes()`: substring matching lets a 2-char milestone ID
+ * like "M2" fire inside unrelated words — the audit's example was
+ * "M2" matching "confirm2FA migration". The lookarounds below require the
+ * needle to NOT be preceded/followed by an alphanumeric character, so
+ * "M4" still matches "Telemedicine M4 integration", "(closes M4)" and
+ * "M4:" — but "m2" no longer matches "confirm2fa".
+ *
+ * Known, accepted edge: "M4" still matches inside "M4-1" (hyphen is a
+ * boundary). Pre-existing behavior, rare in practice, and far less wrong
+ * than the alphanumeric-collision class this fixes.
+ */
+export function containsIdToken(text: string, id: string): boolean {
+  if (!id) return false
+  const key = id.toLowerCase()
+  let re = idTokenRegexCache.get(key)
+  if (!re) {
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    re = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i')
+    idTokenRegexCache.set(key, re)
+  }
+  return re.test(text)
+}
+
 /**
  * Find a milestone by its externalId (e.g. "M1", "M2"). Case-insensitive.
  * Returns null if not found or if the milestone has no externalId.
@@ -50,12 +80,28 @@ export function findMilestoneByExternalId(
 }
 
 /**
+ * Result of findMilestoneDelivery — delivery evidence for one milestone,
+ * split by match strength so the confidence rubric can weight them
+ * differently (weak matches must not be able to lift a finding into the
+ * HIGH bucket the way strong ID-mention matches do — see confidence.ts).
+ */
+export interface MilestoneDeliveryMatch {
+  /** STRONG: activity title mentions the milestone externalId as an ID token. */
+  activities: EngineCodeActivity[]
+  /** WEAK: activity title shares >= 2 significant tokens with the milestone
+  * description (no explicit ID mention). Capped at 0.10 confidence weight. */
+  weakActivities: EngineCodeActivity[]
+  /** Tickets whose title/description mention the externalId as an ID token. */
+  tickets: EngineTicket[]
+}
+
+/**
  * Find delivery evidence for a milestone. A milestone is considered
  * "delivered" if EITHER:
  *
  *   (a) STRONG match: a code activity (PR/commit/merge) title explicitly
- *       mentions the milestone's externalId (e.g. "M4" in the title).
- *       One externalId mention is sufficient.
+ *       mentions the milestone's externalId as an ID token (e.g. "M4" in
+ *       the title, boundary-checked — see containsIdToken).
  *
  *   (b) WEAK match: a code activity's title shares >= 2 significant
  *       tokens with the milestone's DESCRIPTION (e.g. PR titled
@@ -64,41 +110,49 @@ export function findMilestoneByExternalId(
  *       Requires 2+ shared tokens to reduce false positives — a single
  *       shared generic word ("auth", "api") is not enough.
  *
- * Tickets are matched by externalId-in-title OR description-inclusion only
+ * Tickets are matched by externalId-token-in-title or description only
  * (tickets rarely restate the milestone description).
  *
- * Returns the matching code activities (PRs/commits) and tickets — these
- * become `delivery_record` evidence rows in the resulting finding.
+ * Returns the matches SPLIT BY STRENGTH — these become `delivery_record`
+ * evidence rows in the resulting finding, with `matchStrength` stamped so
+ * the confidence composite can tell them apart.
  */
 export function findMilestoneDelivery(
   milestone: EngineMilestone,
   ctx: { codeActivities: EngineCodeActivity[]; tickets: EngineTicket[] }
-): { activities: EngineCodeActivity[]; tickets: EngineTicket[] } {
-  if (!milestone.externalId) return { activities: [], tickets: [] }
-  const needle = milestone.externalId.toLowerCase()
+): MilestoneDeliveryMatch {
+  const strong: EngineCodeActivity[] = []
+  const weak: EngineCodeActivity[] = []
+  if (milestone.externalId) {
+    // Strong match: externalId mentioned in the title as an ID token.
+    for (const a of ctx.codeActivities) {
+      if (containsIdToken(a.title, milestone.externalId)) strong.push(a)
+    }
 
-  // Strong match: externalId mentioned in the title.
-  const activities = ctx.codeActivities.filter(a =>
-    a.title.toLowerCase().includes(needle)
-  )
-
-  // Weak match: >= 2 shared significant tokens with the milestone description.
-  // Only consider activities NOT already matched by externalId.
-  const descTokens = new Set(tokenize(milestone.description))
-  for (const a of ctx.codeActivities) {
-    if (activities.includes(a)) continue // already matched strongly
-    const titleTokens = tokenize(a.title)
-    const shared = titleTokens.filter(t => descTokens.has(t))
-    // Dedupe shared tokens (title may repeat a token).
-    const distinctShared = new Set(shared)
-    if (distinctShared.size >= 2) activities.push(a)
+    // Weak match: >= 2 shared significant tokens with the milestone
+    // description. Only consider activities NOT already matched strongly.
+    if (milestone.description) {
+      const descTokens = new Set(tokenize(milestone.description))
+      for (const a of ctx.codeActivities) {
+        if (strong.includes(a)) continue // already matched strongly
+        const titleTokens = tokenize(a.title)
+        const shared = titleTokens.filter(t => descTokens.has(t))
+        // Dedupe shared tokens (title may repeat a token).
+        const distinctShared = new Set(shared)
+        if (distinctShared.size >= 2) weak.push(a)
+      }
+    }
   }
 
-  const tickets = ctx.tickets.filter(t =>
-    t.title.toLowerCase().includes(needle) ||
-    (t.description?.toLowerCase().includes(needle) ?? false)
-  )
-  return { activities, tickets }
+  const extId = milestone.externalId
+  const tickets = extId
+    ? ctx.tickets.filter(
+        t =>
+          containsIdToken(t.title, extId) ||
+          (t.description ? containsIdToken(t.description, extId) : false)
+      )
+    : []
+  return { activities: strong, weakActivities: weak, tickets }
 }
 
 /**
@@ -111,12 +165,13 @@ export function findMilestoneBilling(
   milestone: EngineMilestone,
   invoices: EngineInvoice[]
 ): { lines: Array<{ line: EngineInvoiceLine; invoice: EngineInvoice }> } {
-  if (!milestone.externalId) return { lines: [] }
-  const needle = milestone.externalId.toLowerCase()
   const lines: Array<{ line: EngineInvoiceLine; invoice: EngineInvoice }> = []
+  if (!milestone.externalId) return { lines: [] }
   for (const inv of invoices) {
     for (const line of inv.lines) {
-      if (line.description.toLowerCase().includes(needle)) {
+      // ID-token match (boundary-checked) — "M2" must not fire inside an
+      // unrelated narrative that happens to contain "m2" mid-word.
+      if (containsIdToken(line.description, milestone.externalId)) {
         lines.push({ line, invoice: inv })
       }
     }

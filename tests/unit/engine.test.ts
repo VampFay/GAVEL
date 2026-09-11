@@ -14,6 +14,7 @@ import {
   matchExclusionToDelivery,
   findLineItemsForMilestone,
   daysBetween,
+  containsIdToken,
 } from '../../src/lib/engine/entity-resolution'
 import {
   computeConfidenceScore,
@@ -21,6 +22,8 @@ import {
   parseConfidenceBreakdown,
   bucketConfidence,
   stampConfidence,
+  effectiveWeight,
+  WEAK_DELIVERY_WEIGHT_CAP,
   EVIDENCE_WEIGHTS,
 } from '../../src/lib/engine/confidence'
 
@@ -462,27 +465,49 @@ describe('entity-resolution helpers', () => {
   describe('findMilestoneDelivery', () => {
     it('finds delivery records for M4', () => {
       const m4 = findMilestoneByExternalId(baseInput.milestones, 'M4')!
-      const { activities, tickets } = findMilestoneDelivery(m4, {
+      const { activities, weakActivities, tickets } = findMilestoneDelivery(m4, {
         codeActivities: baseInput.codeActivities,
         tickets: baseInput.tickets,
       })
-      // The PR #284 title contains "M4" → 1 activity match.
+      // The PR #284 title contains "M4" → 1 STRONG activity match.
       // The Jira ticket titles in the fixture don't mention "M4" (only
       // the PR title does) → 0 ticket matches. This mirrors how real
       // delivery records look: devs reference milestones in PR titles,
       // not in ticket titles.
       expect(activities.length).toBe(1)
       expect(activities[0]?.ref).toBe('#284')
+      expect(weakActivities.length).toBe(0)
       expect(tickets.length).toBe(0)
     })
     it('finds delivery records for M5 (via PR title mention)', () => {
       const m5 = findMilestoneByExternalId(baseInput.milestones, 'M5')!
-      const { activities, tickets } = findMilestoneDelivery(m5, {
+      const { activities, weakActivities, tickets } = findMilestoneDelivery(m5, {
         codeActivities: baseInput.codeActivities,
         tickets: baseInput.tickets,
       })
       expect(activities.length).toBe(1)
       expect(activities[0]?.ref).toBe('#341')
+      expect(weakActivities.length).toBe(0)
+      expect(tickets.length).toBe(0)
+    })
+    it('splits STRONG vs WEAK matches — seed-style data (no ID mention in titles)', () => {
+      // Mirrors the actual SEEDED data (unlike the fixture above): the PR
+      // title shares >= 2 tokens with the milestone DESCRIPTION but never
+      // mentions "M4" explicitly.
+      const m4 = findMilestoneByExternalId(baseInput.milestones, 'M4')!
+      const seedStyleActivities = [
+        {
+          ...baseInput.codeActivities[1]!, // #284 shape
+          title: 'Telemedicine WebRTC integration — closes ENG-131', // no "M4"
+        },
+      ]
+      const { activities, weakActivities, tickets } = findMilestoneDelivery(m4, {
+        codeActivities: seedStyleActivities,
+        tickets: baseInput.tickets,
+      })
+      expect(activities.length).toBe(0)          // no explicit ID mention
+      expect(weakActivities.length).toBe(1)       // telemedicine + integration overlap
+      expect(weakActivities[0]?.ref).toBe('#284')
       expect(tickets.length).toBe(0)
     })
     it('returns empty for an unknown milestone', () => {
@@ -761,5 +786,140 @@ describe('confidence decomposition', () => {
     it('contradicting evidence has a NEGATIVE weight', () => {
       expect(EVIDENCE_WEIGHTS.contradicting).toBeLessThan(0)
     })
+  })
+})
+
+// ─────────── Audit v3 engine regressions ───────────
+//
+// Two engine-correctness bugs flagged by the external audit and fixed in
+// this iteration, each pinned by a regression test:
+//   1. Entity resolution used unguarded substring matching on short IDs —
+//      "M2" fired inside "confirm2FA". Fixed by containsIdToken's
+//      alphanumeric-boundary lookarounds.
+//   2. Confidence weighted a fuzzy 2-token-overlap weak delivery match
+//      identically (0.25) to an explicit milestone-ID strong match, so
+//      both could reach the same HIGH bucket. Fixed by stamping
+//      matchStrength and capping weak rows at 0.10.
+
+describe('containsIdToken — ID boundary matching (audit v3, engine bug #2)', () => {
+  it('does NOT match "M2" inside "confirm2FA migration" (the audit\'s exact case)', () => {
+    expect(containsIdToken('confirm2FA migration', 'M2')).toBe(false)
+  })
+  it('does NOT match short IDs buried inside words', () => {
+    expect(containsIdToken('Eng101 oauth token refresh', 'M1')).toBe(false)
+    expect(containsIdToken('system2phase rollout', 'M2')).toBe(false)
+    expect(containsIdToken('postgres12 upgrade notes', 'M4')).toBe(false)
+  })
+  it('matches IDs with clean boundaries', () => {
+    expect(containsIdToken('Telemedicine M4 integration', 'M4')).toBe(true)
+    expect(containsIdToken('(closes M4)', 'M4')).toBe(true)
+    expect(containsIdToken('M4: final pass', 'M4')).toBe(true)
+    expect(containsIdToken('m4 lowercase', 'M4')).toBe(true) // case-insensitive
+  })
+  it('matches multi-word / hyphenated haystacks correctly', () => {
+    expect(containsIdToken('records 50,001–87,000 for M5', 'M5')).toBe(true)
+    expect(containsIdToken('ENG-155 legacy migration', 'M5')).toBe(false)
+  })
+  it('returns false for empty id', () => {
+    expect(containsIdToken('anything', '')).toBe(false)
+  })
+})
+
+describe('weak-delivery confidence cap (audit v3, engine bug #1)', () => {
+  const strongDelivery = {
+    evidenceType: 'delivery_record' as const,
+    source: 'github' as const,
+    refId: '#284',
+    title: 'PR #284 — Telemedicine WebRTC integration — M4',
+    detail: null,
+    timestamp: null,
+    weight: EVIDENCE_WEIGHTS.delivery_record,
+    matchStrength: 'strong' as const,
+  }
+  const weakDelivery = {
+    ...strongDelivery,
+    refId: '#285',
+    title: 'PR #285 — Telemedicine integration follow-up',
+    matchStrength: 'weak' as const,
+  }
+  const contract = {
+    evidenceType: 'contract_clause' as const,
+    source: 'sow' as const,
+    refId: 'M4',
+    title: 'SOW §3 — Milestone M4',
+    detail: null,
+    timestamp: null,
+    weight: EVIDENCE_WEIGHTS.contract_clause,
+  }
+  const billing = {
+    evidenceType: 'billing_record' as const,
+    source: 'invoice' as const,
+    refId: null,
+    title: 'No invoices on file',
+    detail: null,
+    timestamp: null,
+    weight: EVIDENCE_WEIGHTS.billing_record,
+  }
+
+  it('effectiveWeight caps weak delivery rows at WEAK_DELIVERY_WEIGHT_CAP', () => {
+    expect(effectiveWeight(weakDelivery)).toBe(WEAK_DELIVERY_WEIGHT_CAP)
+    expect(effectiveWeight(strongDelivery)).toBe(EVIDENCE_WEIGHTS.delivery_record)
+    // Even a rule passing a FAT weight on a weak row is clamped.
+    expect(effectiveWeight({ ...weakDelivery, weight: 0.9 })).toBe(WEAK_DELIVERY_WEIGHT_CAP)
+    // Unstamped rows keep full weight (backward compatible).
+    expect(effectiveWeight({ ...weakDelivery, matchStrength: undefined })).toBe(EVIDENCE_WEIGHTS.delivery_record)
+  })
+
+  it('the audit\'s exact scenario: weak-only can no longer reach HIGH, strong can', () => {
+    // contract 0.30 + weak delivery 0.10 + billing 0.20 = 0.60 → MEDIUM
+    const weakScore = computeConfidenceScore([contract, weakDelivery, billing])
+    expect(weakScore).toBe(0.6)
+    expect(bucketConfidence(weakScore)).toBe('MEDIUM')
+    // contract 0.30 + strong delivery 0.25 + billing 0.20 = 0.75 → HIGH
+    const strongScore = computeConfidenceScore([contract, strongDelivery, billing])
+    expect(strongScore).toBe(0.75)
+    expect(bucketConfidence(strongScore)).toBe('HIGH')
+  })
+
+  it('weak rows also cap inside the pillar breakdown (delivery pillar)', () => {
+    const breakdown = computeConfidenceBreakdown([contract, weakDelivery, billing])
+    expect(breakdown.delivery).toBe(WEAK_DELIVERY_WEIGHT_CAP)
+    const strongBreakdown = computeConfidenceBreakdown([contract, strongDelivery, billing])
+    expect(strongBreakdown.delivery).toBe(EVIDENCE_WEIGHTS.delivery_record)
+  })
+
+  it('end-to-end: a milestone whose only delivery is fuzzy lands at MEDIUM, not HIGH', () => {
+    // Seed-style data — PR titles that never mention the milestone ID.
+    const input: EngineInput = {
+      ...baseInput,
+      codeActivities: [
+        {
+          ...baseInput.codeActivities[1]!, // #284 shape
+          title: 'Telemedicine WebRTC integration — closes ENG-131', // no "M4"
+        },
+      ],
+    }
+    const out = runEngine(input, { now: NOW })
+    const m4 = out.findings.find(
+      f => f.type === 'missed_milestone' && f.title.includes('M4')
+    )
+    expect(m4).toBeDefined()
+    if (!m4) return
+    expect(m4.confidence).toBe('MEDIUM')          // was HIGH before the cap
+    expect(m4.confidenceScore).toBe(0.6)          // 0.30 + 0.10 + 0.20
+    const weakRows = m4.evidence.filter(e => e.matchStrength === 'weak')
+    expect(weakRows.length).toBe(1)               // the fuzzy PR is stamped
+  })
+
+  it('end-to-end: explicit ID mention (strong) still reaches HIGH', () => {
+    const out = runEngine(baseInput, { now: NOW }) // fixture #284 title has "M4"
+    const m4 = out.findings.find(
+      f => f.type === 'missed_milestone' && f.title.includes('M4')
+    )
+    expect(m4).toBeDefined()
+    if (!m4) return
+    expect(m4.confidence).toBe('HIGH')
+    expect(m4.confidenceScore).toBe(0.75)         // 0.30 + 0.25 + 0.20
+    expect(m4.evidence.every(e => e.matchStrength !== 'weak')).toBe(true)
   })
 })

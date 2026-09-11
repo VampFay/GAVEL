@@ -13,8 +13,12 @@ import { money } from '@/lib/money'
  *   1. The milestone's due date is in the past (or it has delivery evidence
  *      with a timestamp past the due date).
  *   2. There is delivery evidence — a code activity (PR/commit/merge) whose
- *      title mentions the milestone's externalId (e.g. "M4") AND/OR a
- *      ticket marked done whose title mentions the milestone.
+ *      title mentions the milestone's externalId as an ID token (e.g. "M4")
+ *      AND/OR a ticket marked done whose title mentions the milestone, OR a
+ *      weak description-overlap match (see findMilestoneDelivery). Weak
+ *      matches still emit the finding but their evidence rows are stamped
+ *      matchStrength 'weak' — capped at 0.10 in the confidence composite so
+ *      fuzzy delivery can't reach HIGH on its own.
  *   3. There is NO invoice line whose description mentions the milestone's
  *      externalId, AND no invoice line in the 30-day window after delivery.
  *
@@ -52,16 +56,23 @@ export const missedMilestoneRule: Rule = {
         codeActivities: input.codeActivities,
         tickets: input.tickets,
       })
-      if (delivery.activities.length === 0 && delivery.tickets.length === 0) {
+      if (
+        delivery.activities.length === 0 &&
+        delivery.weakActivities.length === 0 &&
+        delivery.tickets.length === 0
+      ) {
         // No delivery evidence — milestone may simply not be done yet.
         // Not a missed-milestone finding.
         continue
       }
 
       // Determine the "delivery date" — the timestamp of the latest
-      // delivery record (PR merge or ticket close).
+      // delivery record (PR merge or ticket close). Weak matches count
+      // for the delivery DATE (the work happened — that's the finding's
+      // premise); only their CONFIDENCE contribution is capped.
       const deliveryDates: Date[] = []
       for (const a of delivery.activities) deliveryDates.push(a.timestamp)
+      for (const a of delivery.weakActivities) deliveryDates.push(a.timestamp)
       for (const t of delivery.tickets) {
         if (t.externalUpdated) deliveryDates.push(t.externalUpdated)
       }
@@ -97,6 +108,9 @@ export const missedMilestoneRule: Rule = {
       })
 
       // Delivery records — each matching PR/commit + each matching ticket.
+      // Strong matches (explicit milestone-ID mention) carry the full 0.25
+      // weight; weak description-overlap matches are stamped 'weak' and
+      // capped at 0.10 in the confidence composite (see confidence.ts).
       for (const a of delivery.activities) {
         evidence.push({
           evidenceType: 'delivery_record',
@@ -106,6 +120,19 @@ export const missedMilestoneRule: Rule = {
           detail: `${a.type === 'pr' ? 'PR merged' : 'commit'} ${a.timestamp.toISOString().slice(0, 10)} by ${a.author} · ${a.additions ?? 0} additions / ${a.filesChanged ?? 0} files`,
           timestamp: a.timestamp,
           weight: EVIDENCE_WEIGHTS.delivery_record,
+          matchStrength: 'strong',
+        })
+      }
+      for (const a of delivery.weakActivities) {
+        evidence.push({
+          evidenceType: 'delivery_record',
+          source: 'github',
+          refId: a.ref,
+          title: `${a.ref} — ${a.title}`,
+          detail: `${a.type === 'pr' ? 'PR merged' : 'commit'} ${a.timestamp.toISOString().slice(0, 10)} by ${a.author} · ${a.additions ?? 0} additions / ${a.filesChanged ?? 0} files · linked by description overlap (no explicit ${milestone.externalId} mention)`,
+          timestamp: a.timestamp,
+          weight: EVIDENCE_WEIGHTS.delivery_record,
+          matchStrength: 'weak',
         })
       }
       for (const t of delivery.tickets) {
@@ -114,9 +141,10 @@ export const missedMilestoneRule: Rule = {
           source: 'jira',
           refId: t.externalId,
           title: `${t.externalId} — ${t.title}`,
-          detail: `Status: ${t.status} · Assignee: ${t.assignee ?? 'unassigned'} · Updated ${t.externalUpdated ? t.externalUpdated.toISOString().slice(0, 10) : '(unknown)'}`,
+          detail: `Status: ${t.status} · Assignee: ${t.assignee ?? 'unassigned'} · Updated ${t.externalUpdated ? t.externalUpdated.toISOString().slice(0, 10) : '(unknown)'} · explicit ${milestone.externalId} mention`,
           timestamp: t.externalUpdated,
           weight: EVIDENCE_WEIGHTS.delivery_record,
+          matchStrength: 'strong',
         })
       }
 

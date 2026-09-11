@@ -14,6 +14,15 @@ import type { ConfidenceBreakdown, EngineEvidence, FindingDraft } from './types'
  *   contract_clause   : 0.30 — a SOW clause explicitly addressing the
  *                              issue is the strongest signal.
  *   delivery_record   : 0.25 — code/ticket evidence that the work was done.
+ *                              FULL weight only for STRONG links (explicit
+ *                              milestone-ID mention). WEAK links (fuzzy
+ *                              2-token description overlap) are capped at
+ *                              WEAK_DELIVERY_WEIGHT_CAP = 0.10 — a fuzzy
+ *                              match must never be able to lift a finding
+ *                              into the HIGH bucket that an explicit ID
+ *                              mention earns (audit v3, engine finding #1:
+ *                              weak and strong both weighted 0.25 reached
+ *                              identical HIGH composites).
  *   billing_record    : 0.20 — an invoice (or absence) is structural
  *                              evidence about whether the work was billed.
  *   change_order     : 0.20 — presence/absence of a signed change order.
@@ -42,13 +51,37 @@ export const EVIDENCE_WEIGHTS = {
 } as const
 
 /**
+ * Ceiling for WEAK delivery links (fuzzy description-overlap matches) in
+ * the confidence composite. See EVIDENCE_WEIGHTS above for the rationale.
+ */
+export const WEAK_DELIVERY_WEIGHT_CAP = 0.10
+
+/**
+ * The weight an evidence row actually contributes to the composite.
+ * Weakly-linked delivery rows are clamped to WEAK_DELIVERY_WEIGHT_CAP;
+ * everything else contributes its declared weight. Single choke point —
+ * rules CAN'T accidentally over-credit a fuzzy match by passing a fat
+ * weight, the cap is enforced here.
+ */
+export function effectiveWeight(e: EngineEvidence): number {
+  if (
+    e.evidenceType === 'delivery_record' &&
+    e.matchStrength === 'weak' &&
+    e.weight > WEAK_DELIVERY_WEIGHT_CAP
+  ) {
+    return WEAK_DELIVERY_WEIGHT_CAP
+  }
+  return e.weight
+}
+
+/**
  * Compute the composite confidence score for a finding's evidence list.
  * Sum of evidence weights, clamped to [0, 1].
  */
 export function computeConfidenceScore(evidence: EngineEvidence[]): number {
   let raw = 0
   for (const e of evidence) {
-    raw += e.weight
+    raw += effectiveWeight(e)
   }
   if (raw < 0) return 0
   if (raw > 1) return 1
@@ -104,7 +137,8 @@ export function computeConfidenceBreakdown(evidence: EngineEvidence[]): Confiden
   for (const e of evidence) {
     const pillar = pillarOf(e)
     if (pillar === null) continue
-    if (e.weight > 0) sums[pillar] += e.weight
+    const w = effectiveWeight(e)
+    if (w > 0) sums[pillar] += w
   }
   return {
     contract: clamp01(sums.contract),
