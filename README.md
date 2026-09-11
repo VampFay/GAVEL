@@ -9,7 +9,7 @@ A forensic reconciliation workbench for dev/IT services firms. It reads what was
 - Deterministic rules first; LLM judgment only for ambiguous calls, always routed to human review
 - Immutable audit log on every action; role-based access control (admin / reviewer / viewer)
 
-**Status:** Phase 0. Contracts are pasted in and delivery records ingested directly; read-only OAuth connectors (GitHub App, Atlassian, Linear) are Phase 2. Postgres migration (row-level tenant isolation, embedding-based matching) pending. Single-instance deployment.
+**Status:** Phase 0→1. Contracts are pasted in and LLM-extracted; delivery + billing evidence now arrives via **CSV/JSON upload** (Jira/GitHub/accounting exports — see *Data ingestion* below); read-only OAuth connectors (GitHub App, Atlassian, Linear, QuickBooks) are Phase 2 and will feed the same pipeline. Postgres migration (row-level tenant isolation, embedding-based matching) pending. Single-instance deployment — cross-tenant authorization does not exist yet; every GET route returns data to any authenticated (in dev: even anonymous) caller. Do not share an instance between customers until tenancy lands.
 
 ## Stack
 
@@ -54,15 +54,28 @@ All env vars are validated at startup by a Zod schema (`src/lib/env.ts`) — any
 | `bun run dev` | dev server on :3000 |
 | `bun run build` / `bun run start` | standalone production build / serve |
 | `bun run lint` / `bun run typecheck` | ESLint / `tsc --noEmit` (strict) |
-| `bun run test` | 141 unit tests (Vitest) |
+| `bun run test` | 184 unit tests (Vitest) |
 | `bun run db:push` / `db:generate` / `db:reset` | Prisma schema ops |
 | `bun run seed:dev` | wipe + reseed demo data (idempotent) |
 
 ## Verification
 
-- **Unit**: `bun run test` — formatters, Zod schemas, env parsing, finding state machine, reconciliation engine, rate limiter
+- **Unit**: `bun run test` — formatters, Zod schemas, env parsing, finding state machine, reconciliation engine, rate limiter, ingestion parser + mappers
 - **Live harness**: `scripts/live-audit.ts` — 78 assertions exercising every API route, role guard, finding state machine, idempotent reconcile, and real LLM extraction against a running server
+- **Ingestion E2E**: `scripts/ingest-demo.sh` — resets the demo DB, uploads the three bundled sample CSVs through `POST /api/ingest`, runs the engine, and asserts that NEW findings were created from the uploaded evidence, then re-uploads everything to prove idempotence (17 assertions)
 - **CI** (`.github/workflows/ci.yml`): lint → typecheck → test → build on every push/PR to main
+
+## Data ingestion
+
+`POST /api/ingest` (admin, multipart) accepts CSV or JSON exports and writes them into the engine's evidence tables — the same `Ticket` / `CodeActivity` / `Invoice`+`InvoiceLine` rows the reconcile route reads:
+
+| Source type | Writes | Idempotence |
+|-------------|--------|-------------|
+| `jira-tickets` | `Ticket` | upsert by (project, externalId) — re-upload updates |
+| `github-commits` | `CodeActivity` | deduped by ref per project |
+| `invoice-lines` | `Invoice` + `InvoiceLine` | existing invoice numbers skipped entirely |
+
+Behavior: `dryRun=true` validates and previews (first 10 rows + row-level errors) without writing. One bad row never rejects the file — it is skipped and reported. Header matching is lenient (`Issue Key` / `issue_key` / `key`…). Dates accept ISO or `dd/mm/yyyy` (day-first, Indian convention); amounts may carry ₹/$ and thousand separators. Limits: 2 MB, 2,500 rows, 20 uploads / 5 min per user. Every commit is audit-logged. Bundled samples live in `public/ingest-samples/` and are loadable from the intake wizard ("Load sample data").
 
 ## Security posture
 
