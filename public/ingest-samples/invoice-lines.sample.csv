@@ -1,0 +1,6 @@
+Invoice Number,Issue Date,Description,Amount,Period Start,Period End,Status
+INV-2025-055,2025-08-04,WCAG 2.1 AA remediation balance (ENG-158),84000,2025-07-01,2025-07-31,issued
+INV-2025-055,,Notification digest scheduler build (ENG-203),46000,2025-07-01,2025-07-31,
+INV-2025-055,,Lab results cache warming (ENG-206),28000,2025-07-01,2025-07-31,
+INV-2025-056,2025-08-18,Audit log retention job + Splunk backpressure fix (ENG-207/208),61000,2025-07-14,2025-08-02,issued
+INV-2025-056,,Patient consent revocation flow — verbal authorization (ENG-202 pending CO),52000,2025-07-03,2025-07-18,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useAppStore } from '@/stores/app-store'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -14,7 +14,7 @@ import { toast } from 'sonner'
 import {
   FileText, GitBranch, ClipboardList, Loader2,
   CheckCircle2, ArrowRight, ArrowLeft, Sparkles, X,
-  IndianRupee, Building2, AlertCircle,
+  IndianRupee, Building2, AlertCircle, Upload,
 } from 'lucide-react'
 import { formatINR, formatDate } from '@/lib/gavel'
 
@@ -169,7 +169,7 @@ export function IntakeModal() {
                 New forensic audit
               </DialogTitle>
               <DialogDescription className="text-xs mt-0.5">
-                Multi-step intake: client → SOW → LLM extraction → review → delivery → forensic engine
+                Multi-step intake: client → SOW → LLM extraction → review → evidence upload → forensic engine
               </DialogDescription>
             </div>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={closeIntake}>
@@ -234,6 +234,7 @@ export function IntakeModal() {
 
             {step === 'delivery' && (
               <DeliveryStep
+                clientId={activeClientId || selectedClientId}
                 onBack={() => setStep('review')}
                 onNext={() => setStep('engine')}
               />
@@ -292,7 +293,7 @@ function Stepper({ step }: { step: Step }) {
     { id: 'sow', label: 'SOW' },
     { id: 'extracting', label: 'Extract' },
     { id: 'review', label: 'Review' },
-    { id: 'delivery', label: 'Delivery' },
+    { id: 'delivery', label: 'Evidence' },
     { id: 'engine', label: 'Engine' },
     { id: 'done', label: 'Done' },
   ]
@@ -586,29 +587,312 @@ function Tile({ label, value }: { label: string; value: string }) {
   )
 }
 
-function DeliveryStep({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
+// ─────────────────────────── Step 4: evidence upload ───────────────────────────
+
+type IngestSourceType = 'jira-tickets' | 'github-commits' | 'invoice-lines'
+
+const SOURCE_CARDS: Array<{
+  id: IngestSourceType
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  sub: string
+  sample: string
+}> = [
+  { id: 'jira-tickets', icon: ClipboardList, title: 'Jira / Linear tickets', sub: 'key, summary, status, dates', sample: 'jira-tickets.sample.csv' },
+  { id: 'github-commits', icon: GitBranch, title: 'GitHub / GitLab activity', sub: 'sha/PR, message, author, date', sample: 'github-commits.sample.csv' },
+  { id: 'invoice-lines', icon: IndianRupee, title: 'Invoice lines', sub: 'invoice no, date, item, amount', sample: 'invoice-lines.sample.csv' },
+]
+
+interface IngestResponse {
+  ok: boolean
+  error?: string
+  parsed?: number
+  valid?: number
+  invalid?: number
+  errors?: Array<{ row: number; field: string; message: string }>
+  preview?: Array<Record<string, unknown>>
+  committed?: {
+    created: number
+    updated: number
+    duplicates: number
+    invoicesCreated: number
+    linesCreated: number
+    linesSkippedExistingInvoice: number
+  }
+}
+
+function DeliveryStep({
+  clientId,
+  onBack,
+  onNext,
+}: {
+  clientId: string
+  onBack: () => void
+  onNext: () => void
+}) {
+  const [sourceType, setSourceType] = useState<IngestSourceType>('jira-tickets')
+  const [phase, setPhase] = useState<'idle' | 'working' | 'preview' | 'imported'>('idle')
+  const [preview, setPreview] = useState<IngestResponse | null>(null)
+  const [ingestError, setIngestError] = useState<string | null>(null)
+  const [imported, setImported] = useState<Array<{ label: string; detail: string }>>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingFileRef = useRef<File | null>(null)
+
+  const postIngest = async (file: File, dryRun: boolean): Promise<IngestResponse> => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('sourceType', sourceType)
+    fd.append('clientId', clientId)
+    fd.append('dryRun', dryRun ? 'true' : 'false')
+    const res = await fetch('/api/ingest', { method: 'POST', body: fd })
+    return (await res.json()) as IngestResponse
+  }
+
+  const runPreview = async (file: File) => {
+    pendingFileRef.current = file
+    setPhase('working')
+    setIngestError(null)
+    setPreview(null)
+    try {
+      const d = await postIngest(file, true)
+      if (!d.ok) {
+        setIngestError(d.error ?? 'upload rejected')
+        setPhase('idle')
+        toast.error('Upload rejected', { description: d.error })
+        return
+      }
+      setPreview(d)
+      setPhase('preview')
+    } catch (e) {
+      setIngestError(e instanceof Error ? e.message : 'network error')
+      setPhase('idle')
+    }
+  }
+
+  const runImport = async () => {
+    const file = pendingFileRef.current
+    if (!file) return
+    setPhase('working')
+    try {
+      const d = await postIngest(file, false)
+      if (!d.ok || !d.committed) {
+        setIngestError(d.error ?? 'import failed')
+        setPhase('preview')
+        toast.error('Import failed', { description: d.error })
+        return
+      }
+      const c = d.committed
+      const detail =
+        sourceType === 'invoice-lines'
+          ? `${c.invoicesCreated} invoice(s), ${c.linesCreated} line(s)` +
+            (c.linesSkippedExistingInvoice ? `, ${c.linesSkippedExistingInvoice} skipped (invoice on file)` : '')
+          : `${c.created} created, ${c.updated} updated` +
+            (c.duplicates ? `, ${c.duplicates} duplicate(s) skipped` : '')
+      setImported(prev => [...prev, { label: `${file.name} · ${sourceType}`, detail }])
+      setPhase('imported')
+      setPreview(null)
+      pendingFileRef.current = null
+      toast.success('Evidence imported', { description: detail })
+    } catch (e) {
+      setIngestError(e instanceof Error ? e.message : 'network error')
+      setPhase('preview')
+    }
+  }
+
+  const loadSample = async () => {
+    const sampleCard = SOURCE_CARDS.find(c => c.id === sourceType)
+    if (!sampleCard) return
+    try {
+      const res = await fetch(`/ingest-samples/${sampleCard.sample}`)
+      if (!res.ok) throw new Error('sample not found')
+      const blob = await res.blob()
+      await runPreview(new File([blob], sampleCard.sample, { type: 'text/csv' }))
+    } catch (e) {
+      toast.error('Could not load sample', { description: e instanceof Error ? e.message : 'unknown' })
+    }
+  }
+
   return (
     <div>
-      <h3 className="text-sm font-medium">4. Delivery records</h3>
+      <h3 className="text-sm font-medium">4. Delivery &amp; billing evidence</h3>
       <p className="text-xs text-muted-foreground mt-1">
-        The engine reconciles against every delivery record already linked to this client in
-        the database. Live OAuth connectors (GitHub, Jira, Linear, QuickBooks) are Phase 2 —
-        record upload lands with them. Below is what each connector will feed once configured.
+        Upload CSV/JSON exports of the client&apos;s delivery and billing records — the engine
+        reconciles them against the contract you just intaked. Files are validated first
+        (preview below); re-uploading the same file is a no-op. Live OAuth connectors
+        (GitHub, Jira, QuickBooks) remain roadmap and will feed the same pipeline.
       </p>
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <DropZone icon={GitBranch} title="GitHub / GitLab" sub="commits, PRs, merges, deploys" />
-        <DropZone icon={ClipboardList} title="Jira / Linear" sub="tickets, epics, status, assignees" />
-        <DropZone icon={IndianRupee} title="Invoices / accounting" sub="QuickBooks, Xero, CSV" />
-        <DropZone icon={FileText} title="Change orders" sub="signed COs for scope additions" />
+      {/* Source type selector */}
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {SOURCE_CARDS.map(c => {
+          const active = c.id === sourceType
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => { setSourceType(c.id); setPhase('idle'); setPreview(null); setIngestError(null) }}
+              className={`text-left rounded-lg border p-3 transition-colors ${
+                active
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:border-primary/40'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <c.icon className={`h-3.5 w-3.5 ${active ? 'text-primary' : 'text-muted-foreground'}`} />
+                <div className="text-xs font-medium">{c.title}</div>
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-1">{c.sub}</div>
+            </button>
+          )
+        })}
       </div>
 
-      <div className="mt-4 p-3 rounded border border-dashed border-border bg-muted/30 text-xs text-muted-foreground">
-        <strong>Today:</strong> the engine reconciles against records already in the database — the seeded
-        demo client (<code className="text-[10px]">Aetherworks / Veridian Patient Portal</code>) has full
-        delivery data (tickets, PRs, invoices). A newly-intaked client has a contract but no delivery records
-        yet, so its first engine run will honestly return zero findings until connectors land.
+      {/* File picker + sample */}
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.json"
+          className="hidden"
+          onChange={e => {
+            const f = e.target.files?.[0]
+            if (f) void runPreview(f)
+            e.target.value = ''
+          }}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={phase === 'working' || !clientId}
+        >
+          <Upload className="h-3.5 w-3.5 mr-1.5" />
+          Choose file (.csv / .json)
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => void loadSample()} disabled={phase === 'working'}>
+          Load sample data
+        </Button>
+        {!clientId && (
+          <span className="text-[10px] text-destructive">select a client first</span>
+        )}
       </div>
+
+      {/* Working spinner */}
+      {phase === 'working' && (
+        <div className="mt-4 py-6 flex flex-col items-center text-center">
+          <Loader2 className="h-5 w-5 text-primary animate-spin" />
+          <p className="mt-2 text-xs text-muted-foreground">Validating upload…</p>
+        </div>
+      )}
+
+      {/* Error */}
+      {ingestError && phase !== 'working' && (
+        <div className="mt-4 p-3 rounded border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/20 text-xs">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 mt-0.5 text-rose-600 dark:text-rose-300 shrink-0" />
+            <div>
+              <div className="font-medium text-rose-900 dark:text-rose-200">Upload rejected</div>
+              <div className="text-rose-700 dark:text-rose-300 mt-0.5">{ingestError}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preview */}
+      {phase === 'preview' && preview && (
+        <div className="mt-4">
+          <div className="grid grid-cols-3 gap-2">
+            <Tile label="Rows parsed" value={String(preview.parsed ?? 0)} />
+            <Tile label="Valid" value={String(preview.valid ?? 0)} />
+            <Tile label="Rejected" value={String(preview.invalid ?? 0)} />
+          </div>
+
+          {(preview.errors?.length ?? 0) > 0 && (
+            <div className="mt-3 p-3 rounded border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/20 text-xs max-h-32 overflow-y-auto scrollbar-thin">
+              <div className="font-medium text-amber-900 dark:text-amber-200 mb-1">
+                {preview.errors?.length} row(s) will be skipped:
+              </div>
+              <ul className="space-y-0.5">
+                {preview.errors?.slice(0, 5).map((e, i) => (
+                  <li key={i} className="text-amber-800 dark:text-amber-300">
+                    row {e.row} · {e.field}: {e.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {preview.preview && preview.preview.length > 0 && (
+            <div className="mt-3 rounded border border-border overflow-hidden">
+              <table className="w-full text-[10px]">
+                <thead className="bg-muted/50 text-muted-foreground">
+                  <tr>
+                    {Object.keys(preview.preview[0] as Record<string, unknown>).slice(0, 5).map(h => (
+                      <th key={h} className="text-left px-2 py-1.5 font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.preview.slice(0, 5).map((row, i) => (
+                    <tr key={i} className="border-t border-border">
+                      {Object.values(row).slice(0, 5).map((v, j) => (
+                        <td key={j} className="px-2 py-1.5 max-w-40 truncate">{String(v ?? '')}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="mt-3 flex items-center gap-2">
+            <Button
+              size="sm"
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
+              onClick={() => void runImport()}
+              disabled={(preview.valid ?? 0) === 0}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+              Import {preview.valid ?? 0} valid record{(preview.valid ?? 0) === 1 ? '' : 's'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setPhase('idle'); setPreview(null); pendingFileRef.current = null }}
+            >
+              Choose a different file
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Imported summary — stack multiple uploads */}
+      {imported.length > 0 && (
+        <div className="mt-4 space-y-1.5">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Imported this session</div>
+          {imported.map((im, i) => (
+            <div key={i} className="flex items-start gap-2 p-2 rounded border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/20 text-xs">
+              <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 text-emerald-600 dark:text-emerald-300 shrink-0" />
+              <div>
+                <div className="font-medium">{im.label}</div>
+                <div className="text-[10px] text-muted-foreground">{im.detail}</div>
+              </div>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="text-[10px] text-primary underline underline-offset-2"
+            onClick={() => setPhase('idle')}
+          >
+            upload another file
+          </button>
+        </div>
+      )}
+
+      <p className="mt-3 text-[10px] text-muted-foreground">
+        Dates accept ISO (YYYY-MM-DD) or dd/mm/yyyy. Amounts may carry ₹/$ and thousand
+        separators. One bad row never rejects the file — it is skipped and reported.
+      </p>
 
       <div className="mt-5 flex justify-between">
         <Button variant="outline" onClick={onBack}>
@@ -620,23 +904,6 @@ function DeliveryStep({ onBack, onNext }: { onBack: () => void; onNext: () => vo
           <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
         </Button>
       </div>
-    </div>
-  )
-}
-
-function DropZone({ icon: Icon, title, sub }: { icon: React.ComponentType<{ className?: string }>; title: string; sub: string }) {
-  // Static informational tile — NOT interactive. An earlier version showed
-  // cursor-pointer + hover affordances with a disabled upload button, which
-  // read as a clickable element that did nothing. Upload arrives with the
-  // Phase-2 connectors; until then this tile only describes the data source.
-  return (
-    <div className="border-2 border-dashed border-border rounded-lg p-5 text-center">
-      <div className="h-9 w-9 mx-auto rounded-md bg-primary/10 text-primary flex items-center justify-center mb-2">
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="text-xs font-medium">{title}</div>
-      <div className="text-[10px] text-muted-foreground mt-0.5">{sub}</div>
-      <Badge variant="outline" className="mt-2 text-[9px] text-muted-foreground">Phase 2 connector</Badge>
     </div>
   )
 }
@@ -754,11 +1021,11 @@ function EngineStep({
           ) : (
             <div className="mt-4 p-4 rounded border border-dashed border-border bg-muted/30 text-xs text-muted-foreground">
               <strong className="text-foreground">No findings.</strong> The engine ran
-              against everything linked to this client. A freshly-intaked contract has no
-              delivery records (tickets, PRs, invoices) attached yet — those arrive with
-              the live connectors (roadmap, Phase 2). Until then the engine legitimately
-              has nothing to reconcile against. The seeded demo client has full delivery
-              data — reconcile it from the Audits view to see findings come out.
+              against everything linked to this client. If no delivery or billing evidence
+              has been attached yet, upload CSV/JSON exports in the previous step (or load
+              the bundled samples) — the engine reconciles whatever is on file. The seeded
+              demo client has full delivery data — reconcile it from the Audits view to see
+              findings come out.
             </div>
           )}
 

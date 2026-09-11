@@ -1,0 +1,9 @@
+sha,message,author,date,additions,deletions,files,url
+a1f2c3d,"Merge UAT regression fixes — closes ENG-201 (records 87,001–102,000)",meera-s,2025-07-20T16:40:00Z,1820,90,21,https://github.com/aetherworks/veridian-portal/pull/361
+b4e5f6a,"Consent revocation endpoint — closes ENG-202 (client-requested, no CO on file)",aisha-k,2025-07-18T11:20:00Z,940,60,12,https://github.com/aetherworks/veridian-portal/pull/362
+c7d8e9f,Notification digest scheduler — closes ENG-203,dev-r,2025-07-22T09:05:00Z,610,20,7,https://github.com/aetherworks/veridian-portal/pull/364
+d0e1f2a,Telemedicine buffer stats — closes ENG-204 (M4 telemetry follow-up),aisha-k,2025-07-24T14:30:00Z,780,40,9,https://github.com/aetherworks/veridian-portal/pull/366
+e3f4a5b,Pharmacy history pagination fix — closes ENG-205,dev-r,2025-07-26T10:15:00Z,320,110,5,https://github.com/aetherworks/veridian-portal/pull/368
+f6a7b8c,Lab results cache warming — closes ENG-206,meera-s,2025-07-28T17:45:00Z,450,15,6,https://github.com/aetherworks/veridian-portal/pull/369
+g9b0c1d,Audit log retention pruning job — closes ENG-207,meera-s,2025-07-30T08:50:00Z,280,10,4,https://github.com/aetherworks/veridian-portal/pull/371
+h2c3d4e,Splunk streaming backpressure fix — closes ENG-208,dev-r,2025-08-02T13:10:00Z,360,140,8,https://github.com/aetherworks/veridian-portal/pull/373

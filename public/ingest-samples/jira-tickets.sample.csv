@@ -1,0 +1,9 @@
+Issue Key,Summary,Issue Type,Status,Assignee,Created,Resolved,Description
+ENG-201,UAT regression fixes for M5 data migration,task,done,Meera S.,2025-07-01,2025-07-15,Regression fixes from the second UAT pass on legacy record migration
+ENG-202,Patient consent revocation flow,story,done,Aisha K.,2025-07-03,2025-07-18,Revocation flow requested verbally by client — no change order on file
+ENG-203,Notification digest scheduler,story,done,Dev R.,2025-07-05,2025-07-22,Daily digest of portal notifications
+ENG-204,Telemedicine buffer stats dashboard,task,done,Aisha K.,2025-07-08,2025-07-24,WebRTC jitter/buffer telemetry for the M4 telemedicine module
+ENG-205,Pharmacy order history pagination,bug,done,Dev R.,2025-07-10,2025-07-26,Slow query on order history beyond page 5
+ENG-206,Lab results cache warming,task,done,Meera S.,2025-07-12,2025-07-28,Pre-warm PDF renderer cache for morning peak
+ENG-207,Audit log retention policy job,chore,done,Meera S.,2025-07-14,2025-07-30,Scheduled pruning per compliance policy
+ENG-208,Splunk streaming backpressure fix,bug,done,Dev R.,2025-07-16,2025-08-02,Backpressure on the audit log streaming integration
