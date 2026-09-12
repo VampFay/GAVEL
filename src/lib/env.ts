@@ -23,6 +23,16 @@ const envSchema = z.object({
     .optional()
     .transform(v => v === 'true'),
 
+  // Sandbox self-heal (fix: wiped DB broke documented demo login). When
+  // enabled (default OUTSIDE production only), the server restores the
+  // demo users — and, on an empty database, the demo dataset — so the
+  // credentials printed on /login keep working after a DB reset.
+  // Set to 'false' to disable, e.g. when provisioning real users by hand.
+  GAVEL_AUTO_SEED_DEMO: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform(v => v === 'false' ? false : true),
+
   // Public — exposed to the client bundle by Next.js via the NEXT_PUBLIC_ prefix.
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_ENABLE_RESEED: z

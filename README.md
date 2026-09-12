@@ -27,6 +27,8 @@ bun run seed:dev                # demo client, contract, 5 findings, 4 alerts
 bun run dev                     # http://localhost:3000
 ```
 
+**Sandbox self-heal:** outside production the server automatically restores the demo accounts (and, on a database with zero clients, the full demo dataset) at startup and on the next login attempt if they go missing — a wiped SQLite file no longer breaks the credentials printed on `/login`. Opt out with `GAVEL_AUTO_SEED_DEMO=false` (e.g. when provisioning real users by hand). Production NEVER auto-seeds.
+
 Demo accounts (created by the seed; the login page hints at them in dev builds only):
 
 | Role | Email | Password |
@@ -44,6 +46,7 @@ All env vars are validated at startup by a Zod schema (`src/lib/env.ts`) — any
 | `DATABASE_URL` | yes | SQLite in dev (`file:../db/custom.db`); Postgres pending |
 | `GAVEL_JWT_SECRET` | prod | HS256 session secret, ≥ 32 chars. Dev uses a loud-warned fallback |
 | `GAVEL_REQUIRE_AUTH` | no | `true` forces strict production auth regardless of NODE_ENV — use on deploy targets that don't set NODE_ENV reliably |
+| `GAVEL_AUTO_SEED_DEMO` | no | dev/test only: self-heal that restores missing demo users + demo dataset on an empty DB (default on). `false` disables; never active in production |
 | `NEXT_PUBLIC_ENABLE_RESEED` | no | dev convenience for the reseed endpoint; keep `false` in prod |
 | `NEXT_PUBLIC_APP_URL` | no | canonical public URL |
 
@@ -54,14 +57,15 @@ All env vars are validated at startup by a Zod schema (`src/lib/env.ts`) — any
 | `bun run dev` | dev server on :3000 |
 | `bun run build` / `bun run start` | standalone production build / serve |
 | `bun run lint` / `bun run typecheck` | ESLint / `tsc --noEmit` (strict) |
-| `bun run test` | 184 unit tests (Vitest) |
+| `bun run test` | 196 unit tests (Vitest) |
 | `bun run db:push` / `db:generate` / `db:reset` | Prisma schema ops |
 | `bun run seed:dev` | wipe + reseed demo data (idempotent) |
 
 ## Verification
 
-- **Unit**: `bun run test` — formatters, Zod schemas, env parsing, finding state machine, reconciliation engine, rate limiter, ingestion parser + mappers
+- **Unit**: `bun run test` — formatters, Zod schemas, env parsing, finding state machine, reconciliation engine, rate limiter, ingestion parser + mappers, bootstrap self-heal gates + login-page credential drift guard
 - **Live harness**: `scripts/live-audit.ts` — 78 assertions exercising every API route, role guard, finding state machine, idempotent reconcile, and real LLM extraction against a running server
+- **Self-heal harness**: `scripts/verify-selfheal.ts` — wipes users / the whole DB against a running server and proves login restores the documented demo accounts (and demo dataset on an empty DB) without a manual reseed; `scripts/wipe-db.ts` is the standalone wipe helper
 - **Ingestion E2E**: `scripts/ingest-demo.sh` — resets the demo DB, uploads the three bundled sample CSVs through `POST /api/ingest`, runs the engine, and asserts that NEW findings were created from the uploaded evidence, then re-uploads everything to prove idempotence (17 assertions)
 - **CI** (`.github/workflows/ci.yml`): lint → typecheck → test → build on every push/PR to main
 

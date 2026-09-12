@@ -4,6 +4,7 @@ import { ok, fail, invalidRequest, withErrorHandler } from '@/lib/api'
 import { authenticate, signToken } from '@/lib/auth'
 import { setAuthCookie } from '@/lib/auth-cookie'
 import { rateLimitStatus, recordRateLimitHit, clientIpFrom } from '@/lib/rate-limit'
+import { ensureDemoData } from '@/lib/bootstrap'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -26,6 +27,15 @@ const LoginSchema = z.object({
  * logging in successfully all morning never locks itself out. Blocked
  * requests get 429 + Retry-After. Single-process scope by design; swap
  * for Redis if the deploy ever scales horizontally.
+ *
+ * Sandbox self-heal (src/lib/bootstrap.ts): if authentication fails AND we
+ * are outside production, the demo users may simply be gone (the sandbox
+ * recreates the SQLite file empty on restart — the exact bug where the
+ * credentials printed below stopped working). ensureDemoData(true) then
+ * restores any missing demo users — and the demo dataset if the DB is
+ * empty — before one retry. It never overwrites existing users, only runs
+ * on FAILED logins, and the rate limiter bounds its cost. Production NEVER
+ * runs this path.
  */
 const IP_MAX = 10
 const IP_WINDOW_MS = 5 * 60_000
@@ -57,7 +67,21 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
     )
   }
 
-  const user = await authenticate(email, password)
+  let user = await authenticate(email, password)
+  if (!user) {
+    // Dev-only self-heal: a wiped sandbox DB is the #1 cause of "the
+    // documented demo credentials stopped working". ensureDemoData(true)
+    // re-checks even inside the normal 30s no-op window — the DB can be
+    // wiped at any moment — and restores missing demo users (never
+    // overwrites existing ones). It only runs on FAILED logins, and the
+    // rate limiter above has already run, so this path cannot be hammered.
+    try {
+      await ensureDemoData(true)
+      user = await authenticate(email, password)
+    } catch {
+      // Bootstrap failure must not mask the normal 401 below.
+    }
+  }
   if (!user) {
     // Generic message — don't leak whether the email exists.
     recordRateLimitHit(ipKey)
