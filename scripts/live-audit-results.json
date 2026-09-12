@@ -7,7 +7,7 @@
   {
     "name": "P1 pages :: GET / returns real HTML shell",
     "pass": true,
-    "detail": "len=81331"
+    "detail": "len=82500"
   },
   {
     "name": "P1 pages :: GET /login renders 200",
@@ -22,7 +22,7 @@
   {
     "name": "P1 unauth :: health payload ok:true",
     "pass": true,
-    "detail": "{\"ok\":true,\"service\":\"gavel\",\"version\":\"0.3.0\",\"sha\":null,\"timestamp\":\"2026-09-09T07:50:13.944Z\"}"
+    "detail": "{\"ok\":true,\"service\":\"gavel\",\"version\":\"0.0.0\",\"sha\":null,\"timestamp\":\"2026-09-12T11:47:40.256Z\"}"
   },
   {
     "name": "P1 unauth :: OPTIONS preflight open (non-401)",
@@ -182,7 +182,7 @@
   {
     "name": "P4 client create :: created client has cuid",
     "pass": true,
-    "detail": "id=cmttstbww002fltz8l7xyigdq"
+    "detail": "id=cmtybma8f0000p4vk7zfnk2e8"
   },
   {
     "name": "P4 extract-contract (REAL LLM) :: extract-contract → 200",
@@ -240,7 +240,7 @@
     "detail": "expected 0, got 0"
   },
   {
-    "name": "P4 finding transitions :: PATCH finding approve → 200 (6cuo8m)",
+    "name": "P4 finding transitions :: PATCH finding approve → 200 (ch36rj)",
     "pass": true,
     "detail": "expected 200, got 200"
   },
@@ -255,7 +255,7 @@
     "detail": "expected 400, got 400"
   },
   {
-    "name": "P4 monitoring :: monitoring toggle off → 200 (99ty44)",
+    "name": "P4 monitoring :: monitoring toggle off → 200 (lafram)",
     "pass": true,
     "detail": "expected 200, got 200"
   },
@@ -275,7 +275,7 @@
     "detail": "status=200"
   },
   {
-    "name": "P4 monitoring :: alert ack → 200 (3rp2lv)",
+    "name": "P4 monitoring :: alert ack → 200 (beuc2t)",
     "pass": true,
     "detail": "expected 200, got 200"
   },
