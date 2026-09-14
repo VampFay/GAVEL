@@ -71,4 +71,6 @@ server.log
 /tool-results/
 
 # Worklog
-worklog.md
+worklog.mdscripts/vlm-shot*.json
+scripts/plan-gen/*.pdf
+scripts/plan-gen/*.png
