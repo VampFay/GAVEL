@@ -1,0 +1,57 @@
+GAVEL — Forensic delivery-to-billing reconciliation
+====================================================
+Release package @ commit 43fdc42 ("ops: re-runnable live UI QA harness")
+Branch: main · full git history preserved · authored by VampFay
+
+CONTENTS
+--------
+1. gavel.bundle            — complete git repository bundle (all commits + history)
+2. screenshots/            — 21 QA evidence captures
+   gavel-final-01..11-*.png   — full live UI QA run (landing, dashboard, review
+                                queue, verdict-flash mid-animation, finding
+                                detail, audits, monitoring, theme, mobile drawer)
+   gavel-motion-*.png         — motion system v2 verification set
+3. worklog.md              — engineering log (Tasks 1–6)
+
+VERIFICATION STATUS (all green)
+-------------------------------
+- ESLint ........ 0 errors (59 advisory warnings, pre-existing)
+- TypeScript .... tsc --noEmit clean
+- Tests ......... 144/144 (unit + integration, vitest)
+- Build ......... production build green
+- Live UI QA .... 21/21 browser-driven assertions, zero console/page errors
+- Motion system . verdict flash (stamp slam -> 1.15s unmount), scroll reveals,
+                  tabs ink, timeline draw, ink-fill bars, critical heartbeat,
+                  theme ink-drop, mobile drawer — all live-verified
+- Re-runnable .. scripts/live-ui-test.sh (in repo) reproduces the live QA
+
+RESTORING THE REPOSITORY
+------------------------
+  git clone gavel.bundle GAVEL
+  cd GAVEL
+  bun install
+  cp .env.example .env            # then set a real AUTH_SECRET for anything
+                                  # beyond local dev
+  bun run db:push                 # create SQLite schema
+  bun run seed:dev                # demo tenant, findings, invoices
+  bun run dev                     # http://localhost:3000
+
+DEMO CREDENTIALS (DEV BUILD ONLY — never shown in production)
+------------------------------------------------------------
+  admin@gavel.demo    / gavel-admin-demo
+  reviewer@gavel.demo / gavel-reviewer-demo
+  viewer@gavel.demo   / gavel-viewer-demo
+
+PUSHING TO GITHUB
+-----------------
+The GitHub remote (VampFay/GAVEL) is NOT updated in this package. To push:
+issue a fresh PAT (Contents RW + Workflows RW + Metadata RO), then
+  GAVEL_GH_TOKEN=<token> bash scripts/push-github.sh
+Never commit or echo the token. Revoke the old token if not already done.
+
+WHAT GAVEL DOES
+---------------
+GAVEL cross-examines your SOW, your delivery evidence (Jira/GitHub) and your
+invoices — then issues a verdict on every billed dollar. It reconciles
+milestones, change orders, effort caps and invoice lines into reviewable
+findings with immutable audit logging.

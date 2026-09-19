@@ -55,3 +55,22 @@ Stage Summary:
 - All 5 production blockers now have working, tested implementations; GAVEL is deployable to real organisations behind HTTPS + real secrets (see docs/DEPLOYMENT.md runbook).
 - GitHub/Jira attachment answer: intake modal → Evidence step → Live connectors panel (owner/repo or host+token, sealed AES-256-GCM) → Sync → same ingestion pipeline as CSV.
 - 3 pre-existing cross-tenant holes found+fixed during verification (unwrapped GET routes, extract-contract clientId, monitoring path ids).
+
+---
+Task ID: sandbox-restart-20260919
+Agent: main (Super Z)
+Task: User requested sandbox restart; diagnosed and repaired degraded dev environment.
+
+Work Log:
+- Diagnosed: app :3000 returned 500 on /api/health while process tree was alive; gateway :81 was 200.
+- Root cause 1: untracked rogue root-level middleware.ts (SHIPLEDGER-era scaffold) importing randomUUID from node:crypto — incompatible with Edge Runtime, broke all /api/* requests. It shadowed the tracked src/middleware.ts (GAVEL JWT middleware, runtime: nodejs).
+- Fix 1: quarantined rogue file to scripts/orphaned/middleware.ts.shipledger-scaffold.bak.
+- Root cause 2: dev.sh boot chain runs `bun run db:push` first; prisma schema now includes required tenantId columns on 14 tables (committed P0 tenant-isolation work), but on-disk SQLite was pre-tenant and non-empty → db push refused, server could not boot.
+- Fix 2: `bun run db:push -- --force-reset` (rebuilt DB with tenant schema) + `bun run seed:dev` (demo dataset with stable DEMO_TENANT_ID, stable demo user IDs).
+- Restart: killed stale process tree, relaunched via scripts/revive-dev.sh (sanctioned re-parent pattern). Healthy in ~8s.
+- Verified: /api/health 200 {"ok":true,"service":"gavel","version":"0.3.0"}; login admin@gavel.demo OK (id demo-user-admin); authed /api/findings returns tenant-scoped data; unauth GET open = documented DEV-only policy; zero Edge Runtime errors in fresh dev.log; gateway :81 → 200.
+
+Stage Summary:
+- Sandbox fully restarted and healthy; two latent breakages fixed (rogue middleware, stale pre-tenant DB).
+- Notable: /api/connectors route directory now exists — GitHub/Jira connector work appears scaffolded but was not part of this restart; pending user task.
+- DB now runs the multi-tenant (P0) schema; demo data seeded under demo tenant.

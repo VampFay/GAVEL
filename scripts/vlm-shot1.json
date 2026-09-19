@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Based on the screenshot provided, here is an exact description of the GAVEL web app interface:\n\n**Page/View:**\n*   **Location:** The user is on the **\"About\"** page (indicated by the breadcrumb `CASE FILE / About` and the highlighted \"About\" item in the left sidebar).\n*   **Context:** This appears to be a landing or marketing-style view within the app, featuring a large headline \"We found money you already\" (likely cut off, intended to be \"lost\" or similar) and subtext about being \"evidence-backed\" and built in GitHub.\n\n**Modal/Form Open:**\n*   A modal titled **\"New forensic audit\"** is currently open and overlaying the main content.\n*   **Modal Header:** Displays a sparkle icon, the title \"New forensic audit\", and a subtitle describing the workflow: \"Multi-step intake: client → SOW → LLM extraction → review → evidence upload → fore...\" (truncated). There is a close 'X' icon in the top right.\n*   **Progress Stepper:** Shows 6 steps. Step **1 (CLIENT)** is active (highlighted in green), while steps 2-6 (SOW, EXTRACT, REVIEW, EVIDENCE, [6]) are greyed out.\n*   **Form Content (Step 1):**\n    *   **Heading:** \"1. Choose the audit client\"\n    *   **Description:** \"The client whose SOW you're auditing. Select an existing one, or create a new client o...\" (truncated).\n    *   **Section - Existing Clients:** Lists one option:\n        *   **\"Aetherworks Technologies Pvt Ltd\"** with the subtext \"Custom software development\".\n    *   **Section - Or Create A New Client:**\n        *   **Field 1:** Label \"Client name\", Placeholder \"e.g. Aetherworks Technologies\".\n        *   **Field 2:** Label \"Industry / segment\", Placeholder \"e.g. Custom software de...\" (truncated).\n    *   **Action Button:** A green button at the bottom right (partially obscured) starting with \"Ne...\" (likely \"Next\").\n\n**Data Displayed:**\n*   **Sidebar Navigation:**\n    *   **Workflow:** Case overview, Audits, Review queue (with a badge showing **5**), Monitoring.\n    *   **General:** About (selected), Plans.\n*   **Top Bar:**\n    *   **Left:** GAVEL logo (\"FORENSIC RECONCILIATION\").\n    *   **Center:** Breadcrumb `CASE FILE / About`.\n    *   **Right:** \"Reset demo\" button and a green \"New intake\" button (which likely triggered the open modal).\n*   **Background Page Text (Partially Obscured):**\n    *   Mentions \"Forensic delivery-to-billing reconciliation · dev/IT services only\".\n    *   Stats visible behind the modal: \"**₹6.8L**\" (Target: unbilled...) and \"**₹25k–₹1L**\" (Audit fee...).\n    *   Section header: \"WHY THIS WEDGE\".\n    *   Headline: \"Every existing player reads your billing stack. We read your **GitHub**.\"\n    *   Body text discusses revenue leakage statistics (4-5% of earned revenue).\n\n**Errors or Broken Elements:**\n*   **Text Truncation/Cutoff:** Several text elements are visibly truncated due to layout constraints or the modal obscuring them:\n    *   The main headline ends abruptly at \"already\".\n    *   The modal's workflow description cuts off at \"fore\".\n    *   The form description cuts off at \"o\".\n    *   The \"Industry / segment\" placeholder cuts off at \"de\".\n    *   The primary action button text is mostly hidden, showing only \"Ne\".\n*   **Visual Obstruction:** The modal is centered but large enough that it significantly blocks the underlying marketing copy and statistics, making the background content difficult to read fully.\n\n**User State:**\n*   Bottom left corner shows the user is logged in as **admin@gavel.demo** (Role: ADMIN, Status: SIGNED IN).",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1789290974,
+  "id": "202609131715309f35875d7fc84adc",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202609131715309f35875d7fc84adc",
+  "usage": {
+    "completion_tokens": 874,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 5823,
+    "prompt_tokens_details": {
+      "cached_tokens": 3
+    },
+    "total_tokens": 6697
+  }
+}

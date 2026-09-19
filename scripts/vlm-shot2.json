@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Based on the screenshot provided, here is an exact description of the GAVEL web app interface:\n\n**Page/View:**\n*   **Location:** The user is on the **\"About\"** page (indicated by the breadcrumb `CASE FILE / About` and the highlighted \"About\" item in the left sidebar).\n*   **Context:** This appears to be a marketing or landing page view within the app dashboard, featuring a large headline \"We found money you already\" (likely \"spent\" or \"paid\") and subtext about reading GitHub instead of just billing stacks.\n\n**Modal/Form Open:**\n*   A modal titled **\"New forensic audit\"** is currently open and overlaying the main content.\n*   **Modal Header:** Displays a sparkle icon, the title, and a subtitle describing the workflow: `Multi-step intake: client → SOW → LLM extraction → review → evidence upload → fore...` (truncated).\n*   **Progress Stepper:** Shows 6 steps. Step **1 (CLIENT)** is active (highlighted in green). The subsequent steps are SOW, EXTRACT, REVIEW, EVIDENCE, and step 6.\n*   **Form Content (Step 1):**\n    *   **Heading:** \"1. Choose the audit client\"\n    *   **Description:** \"The client whose SOW you're auditing. Select an existing one, or create a new client o...\" (truncated).\n    *   **Section - Existing Clients:** Lists one option:\n        *   **Aetherworks Technologies Pvt Ltd** (with subtitle \"Custom software development\").\n    *   **Section - Create New Client:** Contains input fields for \"Client name\" (placeholder: \"e.g. Aetherworks Technologies\") and \"Industry / segment\" (placeholder: \"e.g. Custom software de...\").\n*   **Action Button:** A green button labeled **\"Ne...\"** (truncated, likely \"Next\") is visible at the bottom right of the modal.\n\n**Data Displayed:**\n*   **Existing Client Data:** \"Aetherworks Technologies Pvt Ltd\".\n*   **Background Statistics (partially obscured):**\n    *   \"₹6.8L\" (Target: unbilled... Phase-0 target...)\n    *   \"₹25k–₹1L\" (Audit fee... or 10% success fee)\n*   **User Info (Bottom Left):** `admin@gavel.demo`, Role: `ADMIN`, Status: `SIGNED IN`.\n\n**Error Messages or Broken Elements:**\n*   **No explicit error messages** (e.g., red toast notifications or validation text) are visible.\n*   **Visual/Truncation Issues:**\n    *   Text throughout the interface is heavily truncated with ellipses (`...`) due to the modal size or responsive layout constraints (e.g., workflow description, form descriptions, placeholders, and the primary action button text).\n    *   The background headline \"We found money you already\" seems grammatically incomplete or cut off (likely continues below the modal fold).\n\n**Navigation/UI State:**\n*   **Top Right:** Buttons for \"Reset demo\" and \"New intake\" (green) are visible.\n*   **Sidebar:** \"About\" is selected under the \"GENERAL\" section. Other items include Case overview, Audits, Review queue (with badge '5'), Monitoring, and Plans.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1789291011,
+  "id": "20260913171615a8163b04e2d14d16",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260913171615a8163b04e2d14d16",
+  "usage": {
+    "completion_tokens": 700,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 5823,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 6523
+  }
+}
