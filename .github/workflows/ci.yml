@@ -26,7 +26,7 @@ jobs:
       # Explicit (postinstall also covers this): without a generated client,
       # typecheck fails on every Prisma import — the exact failure mode the
       # v3 audit hit in its own sandbox.
-      - name: Generate Prisma client
+      - name: Generate Prisma client (sqlite — dev/test provider)
         run: bunx prisma generate
 
       - name: Lint
@@ -37,6 +37,23 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      # Production provider track: the committed Postgres schema must be
+      # in sync with the canonical sqlite schema, must generate a valid
+      # client, and the init migration must exist for migrate deploy.
+      - name: PG schema drift check
+        run: bun run schema:check
+
+      - name: Generate Prisma client (postgresql — production provider)
+        run: bun run db:generate:pg
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+      - name: Migration files present
+        run: |
+          test -f prisma/migrations/migration_lock.toml
+          test -f prisma/migrations/0001_init/migration.sql
+          grep -q 'provider = "postgresql"' prisma/migrations/migration_lock.toml
 
       - name: Build
         run: bun run build

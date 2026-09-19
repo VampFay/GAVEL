@@ -19,6 +19,7 @@ import {
   ScanSearch,
   LogOut,
   UserCircle2,
+  Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiGet } from '@/lib/fetch'
@@ -146,6 +147,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <nav className="flex-1 overflow-y-auto px-2 py-4 space-y-1" aria-label="Primary">
             <div className="micro px-2.5 pb-1.5 text-sidebar-foreground/40">Workflow</div>
             {WORKFLOW.map(i => railItem(i))}
+            {me?.role === 'admin' && railItem({
+              view: 'team',
+              label: 'Team',
+              icon: Users,
+              description: 'Users, roles & invites',
+            })}
             <div className="micro px-2.5 pt-5 pb-1.5 text-sidebar-foreground/40">General</div>
             {GENERAL.map(i => railItem(i))}
           </nav>

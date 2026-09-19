@@ -49,11 +49,13 @@ import { getEnv } from '@/lib/env'
 
 const MUTATION_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE'])
 
-// Routes exempt from auth entirely (liveness, CORS, login/logout flow).
+// Routes exempt from auth entirely (liveness, CORS, login/logout flow,
+// invite + password-reset acceptance — all verify their own tokens).
 const OPEN_PATHS = new Set([
   '/api/health',
   '/api/auth/login',
   '/api/auth/logout',
+  '/api/auth/invite',
 ])
 
 // Warn-once flag for the dev-only anonymous-GET escape hatch (below).
@@ -108,10 +110,13 @@ export async function middleware(req: NextRequest) {
 
   if (claims) {
     // Stamp the verified identity into request headers — route handlers
-    // read these via `getCurrentActor()` / `getServerActor()`.
+    // read these via `getCurrentActor()` / `getServerActor()`. The epoch
+    // header lets withErrorHandler compare the token's issue-epoch against
+    // the live User.tokenEpoch (instant revocation — src/lib/api.ts).
     requestHeaders.set('x-gavel-actor', claims.email)
     requestHeaders.set('x-gavel-user-id', claims.sub)
     requestHeaders.set('x-gavel-role', claims.role)
+    requestHeaders.set('x-gavel-epoch', String(claims.epoch))
     // Re-create the response with the updated headers (NextResponse.next
     // snapshots headers at construction time; we need to re-build).
     const verified = NextResponse.next({

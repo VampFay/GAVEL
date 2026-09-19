@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { withErrorHandler } from '@/lib/api'
 import { money } from '@/lib/money'
 import { parseConfidenceBreakdown } from '@/lib/engine/confidence'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ clientId: string }> }
-) {
+export const GET = withErrorHandler(
+  async (
+    _req: NextRequest,
+    { params }: { params: Promise<{ clientId: string }> }
+  ) => {
   const { clientId } = await params
   const client = await db.client.findUnique({
     where: { id: clientId },
@@ -97,4 +99,4 @@ export async function GET(
       monitored: project.monitored,
     },
   })
-}
+})

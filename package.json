@@ -21,9 +21,13 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "db:push": "prisma db push --accept-data-loss",
-    "db:generate": "prisma generate",
+    "db:push:pg": "prisma db push --schema prisma/schema.postgres.prisma --accept-data-loss",
+    "db:generate": "bun scripts/generate.ts",
+    "migrate:deploy": "prisma migrate deploy --schema prisma/schema.postgres.prisma",
+    "schema:sync": "bun scripts/sync-pg-schema.ts",
+    "schema:check": "bun scripts/sync-pg-schema.ts --check",
     "seed:dev": "bun run scripts/seed.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "bun scripts/generate.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.11.1",

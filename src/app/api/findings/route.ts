@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { ok } from '@/lib/api'
+import { ok, withErrorHandler } from '@/lib/api'
 import { PaginationSchema } from '@/lib/schemas'
 import { money } from '@/lib/money'
 
@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic'
  *   - contractId, projectId
  *   - cursor, limit
  */
-export async function GET(req: NextRequest) {
+export const GET = withErrorHandler(async (req: NextRequest) => {
   const url = req.nextUrl
   const search = url.searchParams
 
@@ -79,4 +79,4 @@ export async function GET(req: NextRequest) {
   const nextCursor = hasMore && data.length > 0 ? data[data.length - 1]?.id : null
 
   return ok({ findings: data, nextCursor, hasMore })
-}
+})

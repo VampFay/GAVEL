@@ -38,6 +38,7 @@ export interface AuthClaims {
   sub: string         // User.id
   email: string
   role: UserRole
+  epoch: number       // User.tokenEpoch at issue time — mismatch = revoked
   iat: number         // issued-at, seconds
   exp: number         // expires-at, seconds
 }
@@ -73,8 +74,9 @@ function getJwtSecret(): string {
 }
 
 /**
- * Sign an HS256 JWT for a verified user.
- * Returns the compact JWT string: `<base64url(header)>.<base64url(payload)>.<base64url(sig)>`.
+ * Sign an HS256 JWT for a verified user. `epoch` is the user's current
+ * tokenEpoch — bumping the column (disable, password reset, role change)
+ * retroactively invalidates every token signed with an older epoch.
  */
 export function signToken(claims: Omit<AuthClaims, 'iat' | 'exp'>): string {
   const iat = Math.floor(Date.now() / 1000)
@@ -139,6 +141,7 @@ export function verifyToken(token: string): AuthClaims | null {
     sub: p.sub,
     email: p.email,
     role: p.role,
+    epoch: typeof p.epoch === 'number' ? p.epoch : 0, // legacy tokens = epoch 0
     iat: p.iat,
     exp: p.exp,
   }
@@ -263,18 +266,23 @@ export class AuthError extends Error {
  * Look up a user by email + verify their password. Used by the login
  * endpoint to issue a JWT.
  *
- * Returns the user record (without the hash) on success, or null if
- * the user doesn't exist or the password is wrong.
+ * Rejects (returns null) when: the user doesn't exist, the password is
+ * wrong, the account is DISABLED, or the password was never set (invite
+ * still pending) — the last two are auth failures even with a correct
+ * password, and the generic null keeps the response free of oracles.
+ *
+ * Returns the user record (without the hash) on success.
  */
 export async function authenticate(
   email: string,
   password: string
-): Promise<{ id: string; email: string; role: UserRole; name: string | null } | null> {
+): Promise<{ id: string; email: string; role: UserRole; name: string | null; tokenEpoch: number } | null> {
   const user = await db.user.findUnique({
     where: { email: email.toLowerCase() },
-    select: { id: true, email: true, role: true, name: true, passwordHash: true },
+    select: { id: true, email: true, role: true, name: true, passwordHash: true, status: true, tokenEpoch: true },
   })
   if (!user || !user.passwordHash) return null
+  if (user.status === 'disabled') return null
   const ok = await verifyPassword(password, user.passwordHash)
   if (!ok) return null
   return {
@@ -282,7 +290,84 @@ export async function authenticate(
     email: user.email,
     role: (user.role as UserRole) ?? 'viewer',
     name: user.name,
+    tokenEpoch: user.tokenEpoch,
   }
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Purpose tokens (provisioning — production blocker #3)
+// ───────────────────────────────────────────────────────────────────
+
+export type PurposeTokenType = 'invite' | 'reset'
+
+export const INVITE_TTL_SECONDS = 72 * 60 * 60 // 3 days to accept an invite
+export const RESET_TTL_SECONDS = 24 * 60 * 60  // 1 day to use a reset link
+
+interface PurposeClaims {
+  purpose: PurposeTokenType
+  sub: string // User.id
+  iat: number
+  exp: number
+}
+
+/** Sign a short-lived, single-purpose token (invite / password reset). */
+export function signPurposeToken(purpose: PurposeTokenType, userId: string): string {
+  const iat = Math.floor(Date.now() / 1000)
+  const exp = iat + (purpose === 'invite' ? INVITE_TTL_SECONDS : RESET_TTL_SECONDS)
+  const claims: PurposeClaims = { purpose, sub: userId, iat, exp }
+  const encHeader = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+  const encPayload = b64url(JSON.stringify(claims))
+  const signingInput = `${encHeader}.${encPayload}`
+  return `${signingInput}.${hmacSha256(signingInput, getJwtSecret())}`
+}
+
+/** Verify a purpose token; returns the user id or null (bad/expired/wrong purpose). */
+export function verifyPurposeToken(token: string, expected: PurposeTokenType): string | null {
+  const parts = token.split('.')
+  if (parts.length !== 3) return null
+  const [encHeader, encPayload, sig] = parts as [string, string, string]
+  const signingInput = `${encHeader}.${encPayload}`
+  const expectedSig = hmacSha256(signingInput, getJwtSecret())
+  if (expectedSig.length !== sig.length) return null
+  try {
+    const a = Buffer.from(sig, 'base64url')
+    const b = Buffer.from(expectedSig, 'base64url')
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null
+  } catch {
+    return null
+  }
+  let payload: unknown
+  try {
+    payload = JSON.parse(Buffer.from(encPayload, 'base64url').toString('utf8'))
+  } catch {
+    return null
+  }
+  if (!payload || typeof payload !== 'object') return null
+  const p = payload as Record<string, unknown>
+  if (p.purpose !== expected) return null
+  if (typeof p.sub !== 'string' || typeof p.exp !== 'number') return null
+  if (Date.now() / 1000 >= p.exp) return null
+  return p.sub
+}
+
+/** NIST-style password policy: length first, no forced composition. */
+export const PASSWORD_MIN_LENGTH = 10
+export const PASSWORD_MAX_LENGTH = 200
+
+/** Returns an error message, or null when the password is acceptable. */
+export function passwordPolicyError(password: string): string | null {
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    return `password must be at least ${PASSWORD_MIN_LENGTH} characters`
+  }
+  if (password.length > PASSWORD_MAX_LENGTH) {
+    return `password must be at most ${PASSWORD_MAX_LENGTH} characters`
+  }
+  // Control characters have no business in a typed password.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f]/.test(password)) {
+    return 'password contains control characters'
+  }
+  return null
 }
 
 // ───────────────────────────────────────────────────────────────────

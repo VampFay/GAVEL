@@ -48,7 +48,12 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "warn",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "skills"]
+  ignores: [
+    "node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "skills",
+    // One-shot document generation scripts (CommonJS by design — they run
+    // under plain `node`, not the app's ESM toolchain).
+    "scripts/plan-gen/**",
+  ]
 }];
 
 export default eslintConfig;

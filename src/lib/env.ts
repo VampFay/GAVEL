@@ -39,9 +39,27 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform(v => v === 'true'),
+
+  // ── Production hardening (see docs/DEPLOYMENT.md) ──────────────────
+
+  // Rate-limiter store: 'memory' (single process, zero latency) or 'db'
+  // (shared across instances, survives restarts — the production default,
+  // resolved by callers via effectiveRateLimitStore()).
+  GAVEL_RATE_LIMIT_STORE: z.enum(['memory', 'db']).optional(),
+
+  // 32-byte key material for sealing connector credentials (AES-256-GCM).
+  // Falls back to GAVEL_JWT_SECRET when unset — acceptable for single-tenant
+  // pilots; set explicitly before rotating one without the other.
+  GAVEL_CONNECTOR_SECRET: z.string().min(32, 'GAVEL_CONNECTOR_SECRET must be >=32 chars').optional(),
 })
 
 export type Env = z.infer<typeof envSchema>
+
+/** Effective limiter store: explicit env wins; otherwise db in production, memory in dev/test. */
+export function effectiveRateLimitStore(env: Env): 'memory' | 'db' {
+  if (env.GAVEL_RATE_LIMIT_STORE) return env.GAVEL_RATE_LIMIT_STORE
+  return env.NODE_ENV === 'production' ? 'db' : 'memory'
+}
 
 /**
  * Parse an arbitrary env record against the schema. Pure (no process.env
@@ -80,7 +98,27 @@ let cached: Env | null = null
 export function getEnv(): Env {
   if (cached) return cached
   cached = parseEnv(process.env)
+  warnOnProductionGaps(cached)
   return cached
+}
+
+/**
+ * Non-fatal production configuration warnings. Printed once per process at
+ * first env resolution — a missing JWT secret still hard-fails at token
+ * signing time (src/lib/auth.ts), but a deploy that somehow serves requests
+ * without one should be LOUD in the logs.
+ */
+function warnOnProductionGaps(env: Env): void {
+  if (env.NODE_ENV !== 'production') return
+  if (!process.env.GAVEL_JWT_SECRET || process.env.GAVEL_JWT_SECRET.length < 32) {
+    console.warn(
+      '⚠️  GAVEL: production is running without a real GAVEL_JWT_SECRET. ' +
+      'Every auth-related request will fail until it is set (>=32 random chars).'
+    )
+  }
+  if (env.GAVEL_RATE_LIMIT_STORE !== 'memory' && !env.GAVEL_RATE_LIMIT_STORE) {
+    // Defaulted to 'db' — informational only.
+  }
 }
 
 /** Convenience: true in production. */

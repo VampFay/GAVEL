@@ -15,13 +15,34 @@
 
 import { db } from './db'
 import { hashPassword } from './auth'
+import { DEMO_TENANT_ID, runWithTenant } from './tenant-context'
 
-/** Demo accounts advertised on /login and in the README. Dev-only. */
+/** Demo tenant — stable id so reseeds never invalidate surviving sessions. */
+export const DEMO_TENANT = { id: DEMO_TENANT_ID, name: 'GAVEL Demo', slug: 'demo' } as const
+
+/**
+ * Demo accounts advertised on /login and in the README. Dev-only.
+ * STABLE explicit ids (`demo-user-admin`, …): a wiped-and-reseeded sandbox
+ * keeps the same user rows, so JWTs issued before the reseed still verify
+ * against existing users instead of pointing at dead ids.
+ */
 export const DEMO_USERS = [
-  { email: 'admin@gavel.demo', name: 'Demo Admin', role: 'admin', password: 'gavel-admin-demo' },
-  { email: 'reviewer@gavel.demo', name: 'Demo Reviewer', role: 'reviewer', password: 'gavel-reviewer-demo' },
-  { email: 'viewer@gavel.demo', name: 'Demo Viewer', role: 'viewer', password: 'gavel-viewer-demo' },
+  { id: 'demo-user-admin', email: 'admin@gavel.demo', name: 'Demo Admin', role: 'admin', password: 'gavel-admin-demo' },
+  { id: 'demo-user-reviewer', email: 'reviewer@gavel.demo', name: 'Demo Reviewer', role: 'reviewer', password: 'gavel-reviewer-demo' },
+  { id: 'demo-user-viewer', email: 'viewer@gavel.demo', name: 'Demo Viewer', role: 'viewer', password: 'gavel-viewer-demo' },
 ] as const
+
+/** Idempotently ensure the demo tenant row exists (never overwrites). */
+export async function ensureDemoTenant(): Promise<void> {
+  const existing = await db.tenant.findUnique({
+    where: { id: DEMO_TENANT.id },
+    select: { id: true },
+  })
+  if (existing) return
+  await db.tenant.create({
+    data: { id: DEMO_TENANT.id, name: DEMO_TENANT.name, slug: DEMO_TENANT.slug },
+  })
+}
 
 /**
  * Create any missing demo user. Idempotent and non-destructive: existing
@@ -29,6 +50,7 @@ export const DEMO_USERS = [
  * Returns the emails actually created.
  */
 export async function ensureDemoUsers(): Promise<string[]> {
+  await ensureDemoTenant()
   const created: string[] = []
   for (const u of DEMO_USERS) {
     const existing = await db.user.findUnique({
@@ -38,6 +60,8 @@ export async function ensureDemoUsers(): Promise<string[]> {
     if (existing) continue
     await db.user.create({
       data: {
+        id: u.id,
+        tenantId: DEMO_TENANT.id,
         email: u.email,
         name: u.name,
         role: u.role,
@@ -64,16 +88,24 @@ export interface SeedSummary {
  * PRECONDITION: the target tables are empty (the CLI seed wipes first;
  * the bootstrap only calls this when client.count() === 0). Users are
  * created via ensureDemoUsers() so both entry points share one code path.
+ *
+ * Everything lands in the demo tenant: the whole dataset is created inside
+ * runWithTenant(DEMO_TENANT_ID) so the Prisma extension stamps every row
+ * (works from the bootstrap AND from the CLI seed script, which runs with
+ * no request context).
  */
 export async function seedDemoDataset(): Promise<SeedSummary> {
-  const usersCreated = await ensureDemoUsers()
-  if (usersCreated.length > 0) {
-    console.warn(`GAVEL demo-data: created ${usersCreated.length} missing demo user(s): ${usersCreated.join(', ')}`)
-  }
+  await ensureDemoTenant()
+  await ensureDemoUsers()
+  return runWithTenant(DEMO_TENANT_ID, seedDemoDatasetInner)
+}
+
+async function seedDemoDatasetInner(): Promise<SeedSummary> {
 
   // ─────────────────────────── CLIENT ───────────────────────────
   const client = await db.client.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       name: 'Aetherworks Technologies Pvt Ltd',
       industry: 'Custom software development',
       sizeBand: '10-50',
@@ -123,6 +155,7 @@ Currency: INR
 
   const contract = await db.contract.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       clientId: client.id,
       title: 'Patient Portal Redesign & Integration — SOW',
       effectiveDate: new Date('2025-03-01'),
@@ -148,13 +181,14 @@ Currency: INR
   // run updates these rows in place instead of duplicating them.
   const lineItemRows: { id: string; description: string }[] = []
   for (const li of lineItems) {
-    const row = await db.lineItem.create({ data: { contractId: contract.id, ...li } })
+    const row = await db.lineItem.create({ data: { tenantId: DEMO_TENANT_ID, contractId: contract.id, ...li } })
     lineItemRows.push({ id: row.id, description: row.description })
   }
 
   // ─────────────────────── PROJECT & DELIVERY ───────────────────
   const project = await db.project.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       clientId: client.id,
       contractId: contract.id,
       name: 'Veridian Patient Portal',
@@ -181,7 +215,7 @@ Currency: INR
     { externalId: 'ENG-158', title: 'WCAG 2.1 AA accessibility audit & remediation', type: 'task', status: 'done', assignee: 'Dev R.', externalCreated: new Date('2025-06-05'), externalUpdated: new Date('2025-06-22') },
   ]
   for (const t of tickets) {
-    await db.ticket.create({ data: { projectId: project.id, ...t, description: '' } })
+    await db.ticket.create({ data: { tenantId: DEMO_TENANT_ID, projectId: project.id, ...t, description: '' } })
   }
 
   // Code activity (GitHub-like)
@@ -199,7 +233,7 @@ Currency: INR
     { type: 'pr', ref: '#349', title: 'WCAG 2.1 AA remediation pass — closes ENG-158', author: 'dev-r', timestamp: new Date('2025-06-22T12:00:00Z'), additions: 940, deletions: 380, filesChanged: 28, url: 'https://github.com/aetherworks/veridian-portal/pull/349' },
   ]
   for (const c of commits) {
-    await db.codeActivity.create({ data: { projectId: project.id, ...c } })
+    await db.codeActivity.create({ data: { tenantId: DEMO_TENANT_ID, projectId: project.id, ...c } })
   }
 
   // ─────────────────────── MILESTONES & EXCLUSIONS ─────────────────
@@ -214,7 +248,7 @@ Currency: INR
     { externalId: 'M5', description: 'Data migration + UAT', dueDate: new Date('2025-06-30'), value: 400000, currency: 'INR' },
   ]
   for (const m of milestoneRows) {
-    await db.milestone.create({ data: { contractId: contract.id, ...m } })
+    await db.milestone.create({ data: { tenantId: DEMO_TENANT_ID, contractId: contract.id, ...m } })
   }
   const exclusionRows = [
     { clause: '5.1', description: 'Backend hospital EMR customization is NOT in scope.' },
@@ -225,13 +259,14 @@ Currency: INR
   // signature keys (see above).
   const exclusionRowsCreated: { id: string; clause: string | null }[] = []
   for (const e of exclusionRows) {
-    const row = await db.exclusion.create({ data: { contractId: contract.id, ...e } })
+    const row = await db.exclusion.create({ data: { tenantId: DEMO_TENANT_ID, contractId: contract.id, ...e } })
     exclusionRowsCreated.push({ id: row.id, clause: row.clause })
   }
 
   // ─────────────────────────── INVOICES ──────────────────────────
   const invoice1 = await db.invoice.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       clientId: client.id,
       contractId: contract.id,
       number: 'INV-2025-014',
@@ -242,10 +277,11 @@ Currency: INR
       currency: 'INR',
     },
   })
-  await db.invoiceLine.create({ data: { invoiceId: invoice1.id, description: 'M1 — Auth & SSO complete', amount: 600000, periodStart: new Date('2025-03-01'), periodEnd: new Date('2025-03-31') } })
+  await db.invoiceLine.create({ data: { tenantId: DEMO_TENANT_ID, invoiceId: invoice1.id, description: 'M1 — Auth & SSO complete', amount: 600000, periodStart: new Date('2025-03-01'), periodEnd: new Date('2025-03-31') } })
 
   const invoice2 = await db.invoice.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       clientId: client.id,
       contractId: contract.id,
       number: 'INV-2025-028',
@@ -256,10 +292,11 @@ Currency: INR
       currency: 'INR',
     },
   })
-  await db.invoiceLine.create({ data: { invoiceId: invoice2.id, description: 'M2 — Booking flow + pharmacy module', amount: 950000, periodStart: new Date('2025-04-01'), periodEnd: new Date('2025-04-30') } })
+  await db.invoiceLine.create({ data: { tenantId: DEMO_TENANT_ID, invoiceId: invoice2.id, description: 'M2 — Booking flow + pharmacy module', amount: 950000, periodStart: new Date('2025-04-01'), periodEnd: new Date('2025-04-30') } })
 
   const invoice3 = await db.invoice.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       clientId: client.id,
       contractId: contract.id,
       number: 'INV-2025-041',
@@ -270,7 +307,7 @@ Currency: INR
       currency: 'INR',
     },
   })
-  await db.invoiceLine.create({ data: { invoiceId: invoice3.id, description: 'M3 — Lab results viewer', amount: 550000, periodStart: new Date('2025-05-01'), periodEnd: new Date('2025-05-31') } })
+  await db.invoiceLine.create({ data: { tenantId: DEMO_TENANT_ID, invoiceId: invoice3.id, description: 'M3 — Lab results viewer', amount: 550000, periodStart: new Date('2025-05-01'), periodEnd: new Date('2025-05-31') } })
 
   // M4 (Telemedicine) & M5 (Migration + UAT) NOT yet invoiced → triggers missed_milestone finding later
 
@@ -288,6 +325,7 @@ Currency: INR
   // F1 — Missed milestone (M4 telemedicine completed but no invoice within 30 days)
   const f1 = await db.finding.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       contractId: contract.id,
       projectId: project.id,
       type: 'missed_milestone',
@@ -305,15 +343,16 @@ Currency: INR
     },
   })
   await db.findingEvidence.createMany({ data: [
-    { findingId: f1.id, evidenceType: 'contract_clause', source: 'sow', refId: 'M4', title: 'SOW §3 — Milestone M4', detail: 'Telemedicine integration due 15 June 2025 → INR 7,00,000', timestamp: new Date('2025-03-01'), weight: 0.4 },
-    { findingId: f1.id, evidenceType: 'delivery_record', source: 'github', refId: '#284', title: 'PR #284 — Telemedicine WebRTC integration', detail: 'Merged 14 June 2025 by aisha-k · 3,100 additions / 42 files · closes ENG-131', timestamp: new Date('2025-06-14T11:08:00Z'), weight: 0.35 },
-    { findingId: f1.id, evidenceType: 'delivery_record', source: 'jira', refId: 'ENG-131', title: 'ENG-131 — Telemedicine WebRTC SDK integration', detail: 'Status: done · Assignee: Aisha K. · Updated 14 June 2025', timestamp: new Date('2025-06-14T11:08:00Z'), weight: 0.1 },
-    { findingId: f1.id, evidenceType: 'billing_record', source: 'invoice', refId: 'INV-2025-041', title: 'INV-2025-041 — latest invoice', detail: 'Issued 01 June 2025 · only contains M3 line · no M4 line present', timestamp: new Date('2025-06-01'), weight: 0.08 },
+    { tenantId: DEMO_TENANT_ID, findingId: f1.id, evidenceType: 'contract_clause', source: 'sow', refId: 'M4', title: 'SOW §3 — Milestone M4', detail: 'Telemedicine integration due 15 June 2025 → INR 7,00,000', timestamp: new Date('2025-03-01'), weight: 0.4 },
+    { tenantId: DEMO_TENANT_ID, findingId: f1.id, evidenceType: 'delivery_record', source: 'github', refId: '#284', title: 'PR #284 — Telemedicine WebRTC integration', detail: 'Merged 14 June 2025 by aisha-k · 3,100 additions / 42 files · closes ENG-131', timestamp: new Date('2025-06-14T11:08:00Z'), weight: 0.35 },
+    { tenantId: DEMO_TENANT_ID, findingId: f1.id, evidenceType: 'delivery_record', source: 'jira', refId: 'ENG-131', title: 'ENG-131 — Telemedicine WebRTC SDK integration', detail: 'Status: done · Assignee: Aisha K. · Updated 14 June 2025', timestamp: new Date('2025-06-14T11:08:00Z'), weight: 0.1 },
+    { tenantId: DEMO_TENANT_ID, findingId: f1.id, evidenceType: 'billing_record', source: 'invoice', refId: 'INV-2025-041', title: 'INV-2025-041 — latest invoice', detail: 'Issued 01 June 2025 · only contains M3 line · no M4 line present', timestamp: new Date('2025-06-01'), weight: 0.08 },
   ]})
 
   // F2 — Unbilled overage on legacy migration (cap was 50k; 87k actually migrated)
   const f2 = await db.finding.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       contractId: contract.id,
       projectId: project.id,
       type: 'unbilled_overage',
@@ -331,15 +370,16 @@ Currency: INR
     },
   })
   await db.findingEvidence.createMany({ data: [
-    { findingId: f2.id, evidenceType: 'contract_clause', source: 'sow', refId: '§1.6', title: 'SOW §1.6 — Migration cap', detail: 'Cap 50,000 records. Beyond cap requires change order.', timestamp: new Date('2025-03-01'), weight: 0.35 },
-    { findingId: f2.id, evidenceType: 'delivery_record', source: 'github', refId: '#341', title: 'PR #341 — Legacy record migration', detail: 'Merged 25 June 2025 · description: "records 50,001–87,000" · 1,820 additions', timestamp: new Date('2025-06-25T16:40:00Z'), weight: 0.4 },
-    { findingId: f2.id, evidenceType: 'delivery_record', source: 'jira', refId: 'ENG-155', title: 'ENG-155 — Legacy record migration beyond 50k cap', detail: 'Status: done · Updated 25 June 2025', timestamp: new Date('2025-06-25T16:40:00Z'), weight: 0.15 },
-    { findingId: f2.id, evidenceType: 'billing_record', source: 'change_order', refId: 'none', title: 'No change order found', detail: 'No signed change order covering records beyond the 50,000 cap.', timestamp: new Date('2025-06-25'), weight: 0.1 },
+    { tenantId: DEMO_TENANT_ID, findingId: f2.id, evidenceType: 'contract_clause', source: 'sow', refId: '§1.6', title: 'SOW §1.6 — Migration cap', detail: 'Cap 50,000 records. Beyond cap requires change order.', timestamp: new Date('2025-03-01'), weight: 0.35 },
+    { tenantId: DEMO_TENANT_ID, findingId: f2.id, evidenceType: 'delivery_record', source: 'github', refId: '#341', title: 'PR #341 — Legacy record migration', detail: 'Merged 25 June 2025 · description: "records 50,001–87,000" · 1,820 additions', timestamp: new Date('2025-06-25T16:40:00Z'), weight: 0.4 },
+    { tenantId: DEMO_TENANT_ID, findingId: f2.id, evidenceType: 'delivery_record', source: 'jira', refId: 'ENG-155', title: 'ENG-155 — Legacy record migration beyond 50k cap', detail: 'Status: done · Updated 25 June 2025', timestamp: new Date('2025-06-25T16:40:00Z'), weight: 0.15 },
+    { tenantId: DEMO_TENANT_ID, findingId: f2.id, evidenceType: 'billing_record', source: 'change_order', refId: 'none', title: 'No change order found', detail: 'No signed change order covering records beyond the 50,000 cap.', timestamp: new Date('2025-06-25'), weight: 0.1 },
   ]})
 
   // F3 — Scope expansion: EMR prescription endpoint (excluded per SOW §5.1)
   const f3 = await db.finding.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       contractId: contract.id,
       projectId: project.id,
       type: 'scope_expansion',
@@ -357,15 +397,16 @@ Currency: INR
     },
   })
   await db.findingEvidence.createMany({ data: [
-    { findingId: f3.id, evidenceType: 'contract_clause', source: 'sow', refId: '§5.1', title: 'SOW §5.1 — EMR customization excluded', detail: 'Backend hospital EMR customization is NOT in scope.', timestamp: new Date('2025-03-01'), weight: 0.35 },
-    { findingId: f3.id, evidenceType: 'delivery_record', source: 'github', refId: '#319', title: 'PR #319 — EMR prescription endpoint', detail: 'Merged 12 June 2025 · 1,340 additions · closes ENG-149 · PR title flagged "(out of baseline scope)"', timestamp: new Date('2025-06-12T09:50:00Z'), weight: 0.4 },
-    { findingId: f3.id, evidenceType: 'delivery_record', source: 'jira', refId: 'ENG-149', title: 'ENG-149 — EMR prescription endpoint', detail: 'Status: done · comment thread suggests verbal client authorization', timestamp: new Date('2025-06-12T09:50:00Z'), weight: 0.15 },
-    { findingId: f3.id, evidenceType: 'billing_record', source: 'change_order', refId: 'none', title: 'No signed change order', detail: 'Verbal/email authorization does NOT meet §4 requirement.', timestamp: new Date('2025-06-12'), weight: 0.1 },
+    { tenantId: DEMO_TENANT_ID, findingId: f3.id, evidenceType: 'contract_clause', source: 'sow', refId: '§5.1', title: 'SOW §5.1 — EMR customization excluded', detail: 'Backend hospital EMR customization is NOT in scope.', timestamp: new Date('2025-03-01'), weight: 0.35 },
+    { tenantId: DEMO_TENANT_ID, findingId: f3.id, evidenceType: 'delivery_record', source: 'github', refId: '#319', title: 'PR #319 — EMR prescription endpoint', detail: 'Merged 12 June 2025 · 1,340 additions · closes ENG-149 · PR title flagged "(out of baseline scope)"', timestamp: new Date('2025-06-12T09:50:00Z'), weight: 0.4 },
+    { tenantId: DEMO_TENANT_ID, findingId: f3.id, evidenceType: 'delivery_record', source: 'jira', refId: 'ENG-149', title: 'ENG-149 — EMR prescription endpoint', detail: 'Status: done · comment thread suggests verbal client authorization', timestamp: new Date('2025-06-12T09:50:00Z'), weight: 0.15 },
+    { tenantId: DEMO_TENANT_ID, findingId: f3.id, evidenceType: 'billing_record', source: 'change_order', refId: 'none', title: 'No signed change order', detail: 'Verbal/email authorization does NOT meet §4 requirement.', timestamp: new Date('2025-06-12'), weight: 0.1 },
   ]})
 
   // F4 — Scope expansion: K8s ingress hardening (excluded per SOW §5.2)
   const f4 = await db.finding.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       contractId: contract.id,
       projectId: project.id,
       type: 'scope_expansion',
@@ -383,16 +424,17 @@ Currency: INR
     },
   })
   await db.findingEvidence.createMany({ data: [
-    { findingId: f4.id, evidenceType: 'contract_clause', source: 'sow', refId: '§5.2', title: 'SOW §5.2 — Infra/DevOps billed separately', detail: 'Infrastructure / DevOps work billed separately.', timestamp: new Date('2025-03-01'), weight: 0.4 },
-    { findingId: f4.id, evidenceType: 'delivery_record', source: 'github', refId: '#322', title: 'PR #322 — K8s ingress hardening', detail: 'Merged 10 June 2025 · PR title flags excluded category · 460 additions', timestamp: new Date('2025-06-10T13:24:00Z'), weight: 0.4 },
-    { findingId: f4.id, evidenceType: 'delivery_record', source: 'jira', refId: 'ENG-152', title: 'ENG-152 — K8s ingress hardening', detail: 'Status: done', timestamp: new Date('2025-06-10T13:24:00Z'), weight: 0.1 },
-    { findingId: f4.id, evidenceType: 'billing_record', source: 'invoice', refId: 'none', title: 'No infra invoice found', detail: 'Should be invoiced as separate DevOps line per rate card.', timestamp: new Date('2025-06-10'), weight: 0.1 },
+    { tenantId: DEMO_TENANT_ID, findingId: f4.id, evidenceType: 'contract_clause', source: 'sow', refId: '§5.2', title: 'SOW §5.2 — Infra/DevOps billed separately', detail: 'Infrastructure / DevOps work billed separately.', timestamp: new Date('2025-03-01'), weight: 0.4 },
+    { tenantId: DEMO_TENANT_ID, findingId: f4.id, evidenceType: 'delivery_record', source: 'github', refId: '#322', title: 'PR #322 — K8s ingress hardening', detail: 'Merged 10 June 2025 · PR title flags excluded category · 460 additions', timestamp: new Date('2025-06-10T13:24:00Z'), weight: 0.4 },
+    { tenantId: DEMO_TENANT_ID, findingId: f4.id, evidenceType: 'delivery_record', source: 'jira', refId: 'ENG-152', title: 'ENG-152 — K8s ingress hardening', detail: 'Status: done', timestamp: new Date('2025-06-10T13:24:00Z'), weight: 0.1 },
+    { tenantId: DEMO_TENANT_ID, findingId: f4.id, evidenceType: 'billing_record', source: 'invoice', refId: 'none', title: 'No infra invoice found', detail: 'Should be invoiced as separate DevOps line per rate card.', timestamp: new Date('2025-06-10'), weight: 0.1 },
   ]})
 
   // F5 — Already covered (false positive example to demonstrate review queue dismission).
   // No signature — the engine would never emit this finding (null = manual).
   const f5 = await db.finding.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       contractId: contract.id,
       projectId: project.id,
       type: 'unbilled_overage',
@@ -409,14 +451,15 @@ Currency: INR
     },
   })
   await db.findingEvidence.createMany({ data: [
-    { findingId: f5.id, evidenceType: 'contract_clause', source: 'sow', refId: '§3 M4', title: 'SOW §3 M4 — Telemedicine', detail: 'Milestone value INR 7,00,000 — no line-count cap', timestamp: new Date('2025-03-01'), weight: 0.2 },
-    { findingId: f5.id, evidenceType: 'delivery_record', source: 'github', refId: '#284', title: 'PR #284 — Telemedicine integration', detail: '3,100 additions — within typical scope for the milestone value', timestamp: new Date('2025-06-14T11:08:00Z'), weight: 0.05 },
-    { findingId: f5.id, evidenceType: 'contradicting', source: 'invoice', refId: 'M4', title: 'M4 covered by milestone billing', detail: 'M4 milestone billing structure does not require per-line reconciliation', timestamp: new Date('2025-06-14'), weight: 0.05 },
+    { tenantId: DEMO_TENANT_ID, findingId: f5.id, evidenceType: 'contract_clause', source: 'sow', refId: '§3 M4', title: 'SOW §3 M4 — Telemedicine', detail: 'Milestone value INR 7,00,000 — no line-count cap', timestamp: new Date('2025-03-01'), weight: 0.2 },
+    { tenantId: DEMO_TENANT_ID, findingId: f5.id, evidenceType: 'delivery_record', source: 'github', refId: '#284', title: 'PR #284 — Telemedicine integration', detail: '3,100 additions — within typical scope for the milestone value', timestamp: new Date('2025-06-14T11:08:00Z'), weight: 0.05 },
+    { tenantId: DEMO_TENANT_ID, findingId: f5.id, evidenceType: 'contradicting', source: 'invoice', refId: 'M4', title: 'M4 covered by milestone billing', detail: 'M4 milestone billing structure does not require per-line reconciliation', timestamp: new Date('2025-06-14'), weight: 0.05 },
   ]})
 
   // ─────────────── MONITORED PROJECT & ALERTS (Phase 3) ─────────
   const monitored = await db.monitoredProject.create({
     data: {
+      tenantId: DEMO_TENANT_ID,
       projectId: project.id,
       alertsEnabled: true,
       driftBaseline: 1.0,
@@ -429,11 +472,11 @@ Currency: INR
     { severity: 'warning', category: 'rate_risk', message: 'Senior-engineer hours booked against ENG-149 exceed 24h — rate card authorization required.', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 48) },
   ]
   for (const a of alerts) {
-    await db.alert.create({ data: { monitoredProjectId: monitored.id, ...a } })
+    await db.alert.create({ data: { tenantId: DEMO_TENANT_ID, monitoredProjectId: monitored.id, ...a } })
   }
 
   // Audit log
-  await db.auditLog.create({ data: { actor: 'system', action: 'seed', entityType: 'client', entityId: client.id, detail: 'Demo data seeded for Aetherworks — Veridian Patient Portal audit' } })
+  await db.auditLog.create({ data: { tenantId: DEMO_TENANT_ID, actor: 'system', action: 'seed', entityType: 'client', entityId: client.id, detail: 'Demo data seeded for Aetherworks — Veridian Patient Portal audit' } })
 
   return {
     client: client.id,

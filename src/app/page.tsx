@@ -10,6 +10,7 @@ import { ReviewQueueView } from '@/components/gavel/review-queue-view'
 import { FindingDetailView } from '@/components/gavel/finding-detail-view'
 import { MonitoringView } from '@/components/gavel/monitoring-view'
 import { PricingView } from '@/components/gavel/pricing-view'
+import { TeamView } from '@/components/gavel/team-view'
 import { IntakeModal } from '@/components/gavel/intake-modal'
 
 export default function Home() {
@@ -25,6 +26,7 @@ export default function Home() {
       {view === 'finding_detail' && <FindingDetailView />}
       {view === 'monitoring' && <MonitoringView />}
       {view === 'pricing' && <PricingView />}
+      {view === 'team' && <TeamView />}
       <IntakeModal />
     </AppShell>
   )

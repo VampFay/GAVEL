@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { withErrorHandler } from '@/lib/api'
 import { requireRole } from '@/lib/auth'
 import { getRequestId } from '@/lib/actor'
+import { DEMO_TENANT_ID } from '@/lib/tenant-context'
 
 const execFileAsync = promisify(execFile)
 
@@ -62,6 +63,7 @@ export const POST = withErrorHandler(async (req: Request) => {
     const freshUser = await db.user.findUnique({ where: { email: actor.email } })
     await db.auditLog.create({
       data: {
+        tenantId: freshUser?.tenantId ?? DEMO_TENANT_ID,
         actorId: freshUser?.id ?? null,
         actor: actor.email,
         action: 'seed',

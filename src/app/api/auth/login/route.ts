@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { ok, fail, invalidRequest, withErrorHandler } from '@/lib/api'
 import { authenticate, signToken } from '@/lib/auth'
 import { setAuthCookie } from '@/lib/auth-cookie'
-import { rateLimitStatus, recordRateLimitHit, clientIpFrom } from '@/lib/rate-limit'
+import { checkRateLimit, recordRateLimitHit, clientIpFrom } from '@/lib/rate-limit-store'
 import { ensureDemoData } from '@/lib/bootstrap'
 
 export const runtime = 'nodejs'
@@ -57,8 +57,10 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   const ip = clientIpFrom(req.headers)
   const ipKey = `login:ip:${ip}`
   const emailKey = `login:email:${email}`
-  const ipLimit = rateLimitStatus(ipKey, IP_MAX, IP_WINDOW_MS)
-  const emailLimit = rateLimitStatus(emailKey, EMAIL_MAX, EMAIL_WINDOW_MS)
+  const [ipLimit, emailLimit] = await Promise.all([
+    checkRateLimit(ipKey, IP_MAX, IP_WINDOW_MS),
+    checkRateLimit(emailKey, EMAIL_MAX, EMAIL_WINDOW_MS),
+  ])
   if (!ipLimit.allowed || !emailLimit.allowed) {
     const retryAfterSec = Math.max(ipLimit.retryAfterSec, emailLimit.retryAfterSec)
     return NextResponse.json(
@@ -84,12 +86,12 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
   }
   if (!user) {
     // Generic message — don't leak whether the email exists.
-    recordRateLimitHit(ipKey)
-    recordRateLimitHit(emailKey)
+    await recordRateLimitHit(ipKey, IP_WINDOW_MS)
+    await recordRateLimitHit(emailKey, EMAIL_WINDOW_MS)
     return fail('invalid email or password', 401)
   }
 
-  const token = signToken({ sub: user.id, email: user.email, role: user.role })
+  const token = signToken({ sub: user.id, email: user.email, role: user.role, epoch: user.tokenEpoch })
   const res = ok({
     user: { id: user.id, email: user.email, role: user.role, name: user.name },
   })

@@ -17,6 +17,7 @@ import {
   IndianRupee, Building2, AlertCircle, Upload,
 } from 'lucide-react'
 import { formatINR, formatDate } from '@/lib/gavel'
+import { ConnectorPanel } from './connector-panel'
 
 interface Client {
   id: string
@@ -716,10 +717,11 @@ function DeliveryStep({
     <div>
       <h3 className="text-sm font-medium">4. Delivery &amp; billing evidence</h3>
       <p className="text-xs text-muted-foreground mt-1">
-        Upload CSV/JSON exports of the client&apos;s delivery and billing records — the engine
-        reconciles them against the contract you just intaked. Files are validated first
-        (preview below); re-uploading the same file is a no-op. Live OAuth connectors
-        (GitHub, Jira, QuickBooks) remain roadmap and will feed the same pipeline.
+        Attach the client&apos;s delivery and billing records — the engine
+        reconciles them against the contract you just intaked. Upload CSV/JSON
+        exports (validated first, preview below; re-uploads are a no-op), or
+        pull live from GitHub / Jira with a saved connector below — both feed
+        the exact same pipeline.
       </p>
 
       {/* Source type selector */}
@@ -893,6 +895,11 @@ function DeliveryStep({
         Dates accept ISO (YYYY-MM-DD) or dd/mm/yyyy. Amounts may carry ₹/$ and thousand
         separators. One bad row never rejects the file — it is skipped and reported.
       </p>
+
+      {/* Live connectors — pull straight from GitHub / Jira */}
+      <div className="mt-5 rounded-lg border bg-muted/20 p-4">
+        <ConnectorPanel clientId={clientId} />
+      </div>
 
       <div className="mt-5 flex justify-between">
         <Button variant="outline" onClick={onBack}>

@@ -11,6 +11,7 @@ export type View =
   | 'finding_detail'
   | 'monitoring'
   | 'pricing'
+  | 'team'
 
 interface AppState {
   view: View

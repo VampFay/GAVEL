@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { withErrorHandler } from '@/lib/api'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +17,7 @@ export const dynamic = 'force-dynamic'
  * hasRealDriftData: false, and the UI renders an honest "no data yet"
  * state. When the job lands, the charts light up with zero changes here.
  */
-export async function GET() {
+export const GET = withErrorHandler(async () => {
   const monitored = await db.monitoredProject.findMany({
     include: {
       project: {
@@ -61,4 +62,4 @@ export async function GET() {
   })
 
   return NextResponse.json({ ok: true, monitored: series })
-}
+})

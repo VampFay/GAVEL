@@ -96,4 +96,5 @@ export async function apiMutation<T>(
 
 export const apiPost = <T>(url: string, body?: unknown) => apiMutation<T>(url, 'POST', body)
 export const apiPatch = <T>(url: string, body?: unknown) => apiMutation<T>(url, 'PATCH', body)
+export const apiPut = <T>(url: string, body?: unknown) => apiMutation<T>(url, 'PUT', body)
 export const apiDelete = <T>(url: string) => apiMutation<T>(url, 'DELETE')

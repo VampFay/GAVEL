@@ -112,6 +112,7 @@ export const POST = withErrorHandler(
       },
     })
     if (!client) return fail('client not found', 404)
+    const tenantId = client.tenantId // scoped read ⇒ caller's own tenant
     const contract = client.contracts[0]
     if (!contract) return fail('client has no contract', 404)
     const project = contract.projects[0]
@@ -251,6 +252,7 @@ export const POST = withErrorHandler(
           if (draft.evidence.length) {
             await tx.findingEvidence.createMany({
               data: draft.evidence.map(e => ({
+                tenantId,
                 findingId: match.id,
                 evidenceType: e.evidenceType,
                 source: e.source,
@@ -284,6 +286,7 @@ export const POST = withErrorHandler(
           // Create new.
           const newFinding = await tx.finding.create({
             data: {
+              tenantId,
               contractId: contract.id,
               projectId: project.id,
               type: draft.type,
@@ -304,6 +307,7 @@ export const POST = withErrorHandler(
           if (draft.evidence.length) {
             await tx.findingEvidence.createMany({
               data: draft.evidence.map(e => ({
+                tenantId,
                 findingId: newFinding.id,
                 evidenceType: e.evidenceType,
                 source: e.source,
@@ -324,6 +328,7 @@ export const POST = withErrorHandler(
       // route when a reviewer acts on them).
       await tx.auditLog.create({
         data: {
+          tenantId,
           actorId: actor.id,
           actor: actor.email,
           action: 'reconcile',

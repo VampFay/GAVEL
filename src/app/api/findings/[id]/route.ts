@@ -7,6 +7,7 @@ import {
 } from '@/lib/schemas'
 import { getRequestId } from '@/lib/actor'
 import { requireRole } from '@/lib/auth'
+import { currentTenantId } from '@/lib/tenant-context'
 import { money } from '@/lib/money'
 import { parseConfidenceBreakdown } from '@/lib/engine/confidence'
 import {
@@ -81,6 +82,8 @@ export const PATCH = withErrorHandler(
       select: { id: true, status: true },
     })
     if (!existing) return notFound('finding not found')
+    const tenantId = currentTenantId()
+    if (!tenantId) return notFound('finding not found')
 
     const allowed = ALLOWED_TRANSITIONS[existing.status]
     if (!allowed || !allowed.has(action)) {
@@ -107,6 +110,7 @@ export const PATCH = withErrorHandler(
       })
       await tx.auditLog.create({
         data: {
+          tenantId,
           actorId,
           actor: actor.email,
           action,

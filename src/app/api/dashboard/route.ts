@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { withErrorHandler } from '@/lib/api'
 import { money, sumMoney } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
@@ -22,7 +23,7 @@ export const dynamic = 'force-dynamic'
  * reviewer. The previous implementation used `createdAt` of all non-dismissed
  * findings, which conflated "issue detected" with "money recovered".
  */
-export async function GET() {
+export const GET = withErrorHandler(async () => {
   const [findings, auditedCount, monitored, alerts, log] = await Promise.all([
     db.finding.findMany({
       select: {
@@ -126,4 +127,4 @@ export async function GET() {
       createdAt: l.createdAt,
     })),
   })
-}
+})

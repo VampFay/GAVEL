@@ -6,6 +6,7 @@ import { ExtractContractSchema } from '@/lib/schemas'
 import { getRequestId } from '@/lib/actor'
 import { requireRole } from '@/lib/auth'
 import { toDecimal } from '@/lib/money'
+import { currentTenantId } from '@/lib/tenant-context'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -206,6 +207,17 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
   let reused = false
   if (persist && clientId) {
+    // Tenant guard: the clientId must belong to the caller's tenant. The
+    // scoped read (client extension) masks cross-tenant rows as null —
+    // a foreign client id is indistinguishable from a missing one.
+    const client = await db.client.findUnique({
+      where: { id: clientId },
+      select: { id: true },
+    })
+    if (!client) return fail('client not found', 404)
+    const tenantId = currentTenantId()
+    if (!tenantId) return fail('no tenant context', 500)
+
     // Wrap the entire write in a transaction: contract create + line items
     // + milestones + exclusions + audit-log. All-or-nothing.
     const c = await db.$transaction(async tx => {
@@ -218,6 +230,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
         // Idempotent — don't duplicate. Still log the retry.
         await tx.auditLog.create({
           data: {
+            tenantId,
             actorId: actor.id,
             actor: actor.email,
             action: 'extract',
@@ -232,6 +245,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
       const newContract = await tx.contract.create({
         data: {
+          tenantId,
           clientId,
           title: validated.title ?? 'Uploaded SOW',
           effectiveDate: validated.effectiveDate ? new Date(validated.effectiveDate) : new Date(),
@@ -251,6 +265,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       // creating contracts that could never be reconciled.
       await tx.project.create({
         data: {
+          tenantId,
           clientId,
           contractId: newContract.id,
           name: validated.title ?? `Audit project — ${newContract.title}`,
@@ -264,6 +279,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       if (validated.lineItems.length) {
         await tx.lineItem.createMany({
           data: validated.lineItems.map(li => ({
+            tenantId,
             contractId: newContract.id,
             description: li.description,
             rate: toDecimal(li.rate),
@@ -281,6 +297,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       if (validated.milestones.length) {
         await tx.milestone.createMany({
           data: validated.milestones.map(m => ({
+            tenantId,
             contractId: newContract.id,
             externalId: m.id,
             description: m.description,
@@ -295,6 +312,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
       if (validated.exclusions.length) {
         await tx.exclusion.createMany({
           data: validated.exclusions.map(e => ({
+            tenantId,
             contractId: newContract.id,
             clause: typeof e.clause === 'string' ? e.clause : null,
             description: e.description,
@@ -304,6 +322,7 @@ export const POST = withErrorHandler(async (req: NextRequest) => {
 
       await tx.auditLog.create({
         data: {
+          tenantId,
           actorId: actor.id,
           actor: actor.email,
           action: 'extract',

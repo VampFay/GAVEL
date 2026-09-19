@@ -5,8 +5,9 @@ import { ok, fail, invalidRequest, withErrorHandler } from '@/lib/api'
 import { getRequestId } from '@/lib/actor'
 import { requireRole } from '@/lib/auth'
 import { toDecimal, sumMoney } from '@/lib/money'
-import { rateLimitStatus, recordRateLimitHit } from '@/lib/rate-limit'
+import { checkRateLimit, recordRateLimitHit } from '@/lib/rate-limit-store'
 import { parseUpload, ParseLimitError, MAX_ROWS } from '@/lib/ingest/parse'
+import { commitTickets, commitCodeActivities } from '@/lib/ingest/commit'
 import {
   SOURCE_TYPES,
   mapTickets,
@@ -75,14 +76,14 @@ export const POST = withErrorHandler(
 
     // ── Rate limit (every attempt counts — see route docblock) ────
     const limitKey = `ingest:user:${actor.id}`
-    const limit = rateLimitStatus(limitKey, INGEST_MAX, INGEST_WINDOW_MS)
+    const limit = await checkRateLimit(limitKey, INGEST_MAX, INGEST_WINDOW_MS)
     if (!limit.allowed) {
       return NextResponse.json(
         { ok: false, error: 'too many uploads — try again later' },
         { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } }
       )
     }
-    recordRateLimitHit(limitKey)
+    await recordRateLimitHit(limitKey, INGEST_WINDOW_MS)
 
     // ── Multipart parse ───────────────────────────────────────────
     const contentType = req.headers.get('content-type') ?? ''
@@ -194,6 +195,10 @@ export const POST = withErrorHandler(
     if (!contract) return fail('client has no contract — intake the SOW first', 409)
 
     // ── Commit (single transaction) ───────────────────────────────
+    // tickets + code activities go through the SHARED commit layer
+    // (src/lib/ingest/commit.ts) — the same code path the live
+    // connectors use, so idempotence semantics can never drift.
+    const tenantId = client.tenantId
     let created = 0
     let updated = 0
     let duplicates = 0
@@ -207,6 +212,7 @@ export const POST = withErrorHandler(
         contract.projects[0] ??
         (await tx.project.create({
           data: {
+            tenantId,
             clientId: client.id,
             contractId: contract.id,
             name: contract.title,
@@ -217,79 +223,15 @@ export const POST = withErrorHandler(
       projectId = project.id
 
       if (ticketResult) {
-        const existing = await tx.ticket.findMany({
-          where: { projectId: project.id },
-          select: { externalId: true },
-        })
-        const known = new Set(existing.map(t => t.externalId))
-        for (const t of ticketResult.valid) {
-          const data = {
-            projectId: project.id,
-            externalId: t.externalId,
-            title: t.title,
-            type: t.type,
-            status: t.status,
-            assignee: t.assignee,
-            externalCreated: t.externalCreated,
-            externalUpdated: t.externalUpdated,
-            description: t.description,
-          }
-          if (known.has(t.externalId)) {
-            await tx.ticket.update({
-              where: { projectId_externalId: { projectId: project.id, externalId: t.externalId } },
-              data,
-            })
-            updated++
-          } else {
-            await tx.ticket.create({ data })
-            known.add(t.externalId)
-            created++
-          }
-        }
+        const r = await commitTickets(tx, project.id, tenantId, ticketResult.valid)
+        created = r.created
+        updated = r.updated
       }
 
       if (activityResult) {
-        const existing = await tx.codeActivity.findMany({
-          where: { projectId: project.id },
-          select: { ref: true },
-        })
-        const known = new Set(existing.map(a => a.ref))
-        const seen = new Set<string>()
-        const fresh: Array<{
-          projectId: string
-          type: string
-          ref: string
-          title: string
-          author: string
-          timestamp: Date
-          additions: number | null
-          deletions: number | null
-          filesChanged: number | null
-          url: string | null
-        }> = []
-        for (const a of activityResult.valid) {
-          if (known.has(a.ref) || seen.has(a.ref)) {
-            duplicates++
-            continue
-          }
-          seen.add(a.ref)
-          fresh.push({
-            projectId: project.id,
-            type: a.type,
-            ref: a.ref,
-            title: a.title,
-            author: a.author,
-            timestamp: a.timestamp,
-            additions: a.additions,
-            deletions: a.deletions,
-            filesChanged: a.filesChanged,
-            url: a.url,
-          })
-        }
-        if (fresh.length > 0) {
-          await tx.codeActivity.createMany({ data: fresh })
-          created = fresh.length
-        }
+        const r = await commitCodeActivities(tx, project.id, tenantId, activityResult.valid)
+        created = r.created
+        duplicates = r.duplicates
       }
 
       if (invoiceResult) {
@@ -312,6 +254,7 @@ export const POST = withErrorHandler(
           }
           const invoice = await tx.invoice.create({
             data: {
+              tenantId,
               clientId: client.id,
               contractId: contract.id,
               number,
@@ -325,6 +268,7 @@ export const POST = withErrorHandler(
           })
           await tx.invoiceLine.createMany({
             data: lines.map(l => ({
+              tenantId,
               invoiceId: invoice.id,
               description: l.description,
               amount: toDecimal(l.amount) ?? new Prisma.Decimal(0),
@@ -341,6 +285,7 @@ export const POST = withErrorHandler(
 
       await tx.auditLog.create({
         data: {
+          tenantId,
           actorId: actor.id,
           actor: actor.email,
           action: 'ingest',

@@ -1,15 +1,46 @@
 // GAVEL — Prisma schema
 // Forensic delivery-to-billing reconciliation tool for dev/IT services firms.
-
-// NOTE: provider is sqlite for the dev sandbox. Production should switch to
-// postgresql + pgvector per §8 of the product plan. The Decimal type below
-// works on SQLite (stored as TEXT) and on Postgres (stored as NUMERIC).
+//
+// ── Dual-provider strategy (production blocker #1 fix) ─────────────────────
+// This file is the SINGLE SOURCE OF TRUTH for models. Its provider is sqlite
+// because the dev sandbox and the unit-test suite run on SQLite. Production
+// runs PostgreSQL: `scripts/sync-pg-schema.ts` generates the committed
+// `prisma/schema.postgres.prisma` (provider swapped, everything else
+// identical) and `bun run schema:check` fails CI if the two drift. Real
+// migrations live in `prisma/migrations/` (apply with
+// `bunx prisma migrate deploy --schema prisma/schema.postgres.prisma`).
+// `scripts/generate.ts` picks the right schema for `prisma generate` based
+// on the DATABASE_URL protocol, so dev and production each get a client
+// bound to their own provider.
 //
 // Money fields (totalValue, rate, amount, impactAmount, value, total) are
 // Decimal(14, 2) — never Float. IEEE-754 floats are the wrong type for
 // currency: they drift by fractions of a rupee on sum/multiply, which
 // undermines the entire "precision over noise" pitch. Decimal is stored
 // as TEXT on SQLite and NUMERIC on Postgres (see Prisma docs).
+//
+// ── Tenancy (production blocker #2 fix) ────────────────────────────────────
+// Every row that carries client data has a REQUIRED `tenantId` FK to Tenant.
+// Reads are hard-scoped by the client extension in src/lib/db.ts: cross-
+// tenant queries are impossible without an explicit `runUnscoped()`.
+// Child rows (contract line items, invoice lines…) carry the tenantId
+// redundantly so enforcement never needs a join.
+//
+// ── Provisioning (production blocker #3 fix) ───────────────────────────────
+// User.status ('active'|'disabled') + User.tokenEpoch enable instant session
+// revocation: bumping the epoch invalidates every outstanding JWT for that
+// user (see src/lib/auth.ts + src/lib/request-principal.ts).
+//
+// ── Connectors (production blocker #4 fix) ─────────────────────────────────
+// ConnectorSource stores per-project live-sync configs (GitHub / Jira).
+// Credentials are sealed with AES-256-GCM (src/lib/connectors/crypto.ts) —
+// plaintext tokens never touch the database.
+//
+// ── Multi-instance rate limiting ───────────────────────────────────────────
+// RateLimitCounter is the DB-backed store for the limiter
+// (src/lib/rate-limit-store.ts) so brute-force protection survives process
+// restarts and works behind more than one app instance.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -20,26 +51,48 @@ datasource db {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Identity & tenancy (schema scaffolding — wire Clerk/Auth0 next)
+// Identity & tenancy
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Tenant {
-  id        String   @id @default(cuid())
+  id        String   @id // explicit stable ids for demo ('demo-tenant'); cuid for real tenants
   name      String
   slug      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users User[]
+  users             User[]
+  clients           Client[]
+  contracts         Contract[]
+  changeOrders      ChangeOrder[]
+  lineItems         LineItem[]
+  milestones        Milestone[]
+  exclusions        Exclusion[]
+  projects          Project[]
+  tickets           Ticket[]
+  codeActivities    CodeActivity[]
+  timeEntries       TimeEntry[]
+  invoices          Invoice[]
+  invoiceLines      InvoiceLine[]
+  payments          Payment[]
+  findings          Finding[]
+  findingEvidence   FindingEvidence[]
+  monitoredProjects MonitoredProject[]
+  driftSnapshots    WeeklyDriftSnapshot[]
+  alerts            Alert[]
+  auditLogs         AuditLog[]
+  connectorSources  ConnectorSource[]
 }
 
 model User {
-  id           String   @id @default(cuid())
+  id           String   @id @default(cuid()) // demo users use stable explicit ids (demo-user-admin, …)
   tenantId     String?
   email        String   @unique
   name         String?
   role         String   @default("viewer") // viewer|reviewer|admin
-  passwordHash String?  // scrypt:<salt>:<hash> — null for SSO-only users (not yet implemented)
+  passwordHash String?  // scrypt:<salt>:<hash> — null until the invite is accepted
+  status       String   @default("active") // active|disabled — disabled blocks login + API at once
+  tokenEpoch   Int      @default(0)        // bump to revoke every outstanding JWT for this user
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -47,14 +100,19 @@ model User {
   reviewedFindings Finding[] @relation("ReviewerFindings")
   acknowledgedAlerts Alert[]  @relation("AcknowledgerAlerts")
   auditLogs    AuditLog[]
+  connectorSources ConnectorSource[] @relation("ConnectorCreator")
+
+  @@index([tenantId])
+  @@index([status])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Core organizational entities
+// Core organizational entities (tenant-scoped)
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Client {
   id           String    @id @default(cuid())
+  tenantId     String
   name         String
   industry     String?
   sizeBand     String?   // e.g. "10-50"
@@ -65,16 +123,19 @@ model Client {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
   contracts    Contract[]
   projects     Project[]
   invoices     Invoice[]
 
-  @@index([name])
+  @@index([tenantId])
+  @@index([tenantId, name])
   @@index([deletedAt])
 }
 
 model Contract {
   id              String    @id @default(cuid())
+  tenantId        String
   clientId        String
   title           String
   effectiveDate   DateTime
@@ -88,15 +149,17 @@ model Contract {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  client          Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  lineItems       LineItem[]
-  changeOrders    ChangeOrder[]
-  milestones      Milestone[]
-  exclusions      Exclusion[]
-  projects        Project[]
-  findings        Finding[]
-  invoices        Invoice[]
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  client        Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lineItems     LineItem[]
+  changeOrders  ChangeOrder[]
+  milestones    Milestone[]
+  exclusions    Exclusion[]
+  projects      Project[]
+  findings      Finding[]
+  invoices      Invoice[]
 
+  @@index([tenantId])
   @@index([clientId])
   @@index([status])
   @@index([deletedAt])
@@ -104,21 +167,25 @@ model Contract {
 
 model ChangeOrder {
   id           String   @id @default(cuid())
+  tenantId     String
   contractId   String
   title        String
   description  String
-  value        Decimal? 
+  value        Decimal?
   signedDate   DateTime
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  contract     Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  contract  Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([contractId])
 }
 
 model LineItem {
   id           String   @id @default(cuid())
+  tenantId     String
   contractId   String
   description  String
   rate         Decimal? // per-unit price in `currency`
@@ -129,48 +196,57 @@ model LineItem {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  contract     Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([contractId])
   @@index([milestone])
 }
 
 model Milestone {
   id          String   @id @default(cuid())
+  tenantId    String
   contractId  String
   externalId  String?  // e.g. "M1"
   description String
   dueDate     DateTime?
-  value       Decimal? 
+  value       Decimal?
   currency    String   @default("INR")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([contractId])
   @@unique([contractId, externalId])
 }
 
 model Exclusion {
   id          String   @id @default(cuid())
+  tenantId    String
   contractId  String
   clause      String?  // e.g. "5.1"
   description String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([contractId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Delivery-side records (planned + executed)
+// Delivery-side records (planned + executed) — tenant-scoped
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Project {
   id          String    @id @default(cuid())
+  tenantId    String
   clientId    String
   contractId  String?
   name        String
@@ -181,14 +257,17 @@ model Project {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  contract    Contract?   @relation(fields: [contractId], references: [id], onDelete: SetNull)
-  tickets     Ticket[]
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  client        Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contract      Contract?         @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  tickets       Ticket[]
   codeActivities CodeActivity[]
-  timeEntries  TimeEntry[]
-  findings    Finding[]
-  monitored   MonitoredProject?
+  timeEntries   TimeEntry[]
+  findings      Finding[]
+  monitored     MonitoredProject?
+  connectors    ConnectorSource[]
 
+  @@index([tenantId])
   @@index([clientId])
   @@index([contractId])
   @@index([status])
@@ -197,6 +276,7 @@ model Project {
 
 model Ticket {
   id           String   @id @default(cuid())
+  tenantId     String
   projectId    String
   externalId   String   // e.g. ENG-204
   title        String
@@ -212,14 +292,17 @@ model Ticket {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([projectId])
   @@unique([projectId, externalId])
 }
 
 model CodeActivity {
   id          String   @id @default(cuid())
+  tenantId    String
   projectId   String
   type        String   // commit|pr|merge|deploy
   ref         String   // commit sha or PR number
@@ -233,14 +316,17 @@ model CodeActivity {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([projectId])
   @@index([projectId, timestamp])
 }
 
 model TimeEntry {
   id          String   @id @default(cuid())
+  tenantId    String
   projectId   String
   externalId  String?  // upstream id from Toggl/Harvest/etc.
   assignee    String?
@@ -251,35 +337,40 @@ model TimeEntry {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  project  Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([projectId])
   @@index([projectId, loggedAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Billing-side records
+// Billing-side records — tenant-scoped
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Invoice {
   id           String    @id @default(cuid())
+  tenantId     String
   clientId     String
   contractId   String?
   number       String
   issueDate    DateTime
   dueDate      DateTime?
   status       String    @default("issued") // draft|issued|paid|overdue|void
-  total        Decimal   
+  total        Decimal
   currency     String    @default("INR")
   deletedAt    DateTime? // soft-delete
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  contract     Contract?    @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contract     Contract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
   lines        InvoiceLine[]
   payments     Payment[]
 
+  @@index([tenantId])
   @@index([clientId])
   @@index([contractId])
   @@index([status])
@@ -289,23 +380,27 @@ model Invoice {
 
 model InvoiceLine {
   id           String   @id @default(cuid())
+  tenantId     String
   invoiceId    String
   description  String
-  amount       Decimal  
+  amount       Decimal
   periodStart  DateTime?
   periodEnd    DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  invoice      Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  invoice  Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([invoiceId])
 }
 
 model Payment {
   id          String   @id @default(cuid())
+  tenantId    String
   invoiceId   String
-  amount      Decimal  
+  amount      Decimal
   currency    String   @default("INR")
   paidAt      DateTime
   method      String?  // bank_transfer|card|cheque|upi
@@ -313,25 +408,29 @@ model Payment {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  invoice  Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([invoiceId])
   @@index([paidAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Findings — the core artifact
+// Findings — the core artifact (tenant-scoped)
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Finding {
   id              String    @id @default(cuid())
+  tenantId        String
   contractId      String?
   projectId       String?
   type            String    // missed_milestone|unbilled_overage|scope_expansion|rate_discrepancy|unauthorized_work
   // Deterministic engine idempotency key, e.g. "missed_milestone:<contractId>:<milestoneExternalId>".
   // The reconcile route upserts by this key — NOT by (type, title), which breaks
   // whenever a rule's generated title wording changes (audit v2, finding #1).
-  // Null = manually-created finding the engine does not manage.
+  // Cross-tenant collision is impossible: signatures embed contract/project ids,
+  // which are globally unique. Null = manually-created finding.
   signature       String?   @unique
   title           String
   summary         String
@@ -340,8 +439,8 @@ model Finding {
   confidenceScore Float?    // 0.0-1.0 composite (NOT money — keep Float)
   // Per-pillar sub-scores { contract, delivery, authorization, billing } as a
   // JSON string — "decomposed, not magical" (§9.4; audit v2, finding #2).
-  // SQLite has no Json column type in Prisma; switch to `Json` when the
-  // Postgres migration lands. Null on legacy / manually-created findings.
+  // Kept String for SQLite/Postgres dual-provider parity; revisit with a
+  // dedicated Json column if a provider split ever lands.
   confidenceBreakdown String?
   assessment      String    // billable|already_covered|ambiguous
   recommendedAction String  // approve|dismiss|request_review|draft_change_order
@@ -355,11 +454,13 @@ model Finding {
   reviewedAt      DateTime?
   reviewedById    String?   // FK to User (was: reviewedBy String?)
 
-  contract        Contract?  @relation(fields: [contractId], references: [id], onDelete: SetNull)
-  project         Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  reviewer        User?      @relation("ReviewerFindings", fields: [reviewedById], references: [id], onDelete: SetNull)
-  evidence        FindingEvidence[]
+  tenant        Tenant?    @relation(fields: [tenantId], references: [id])
+  contract      Contract?  @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  project       Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  reviewer      User?      @relation("ReviewerFindings", fields: [reviewedById], references: [id], onDelete: SetNull)
+  evidence      FindingEvidence[]
 
+  @@index([tenantId])
   @@index([status])
   @@index([type])
   @@index([contractId])
@@ -371,6 +472,7 @@ model Finding {
 
 model FindingEvidence {
   id           String   @id @default(cuid())
+  tenantId     String
   findingId    String
   evidenceType String   // contract_clause|delivery_record|billing_record|supporting|contradicting
   source       String   // sow|jira|github|gitlab|invoice|change_order
@@ -382,29 +484,37 @@ model FindingEvidence {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  finding      Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  tenant   Tenant  @relation(fields: [tenantId], references: [id])
+  finding  Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@index([findingId])
   @@index([source])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Continuous monitoring (Phase 3)
+// Continuous monitoring (Phase 3) — tenant-scoped
 // ─────────────────────────────────────────────────────────────────────────────
 
 model MonitoredProject {
   id          String   @id @default(cuid())
+  tenantId    String
   projectId   String   @unique
   startedAt   DateTime @default(now())
   alertsEnabled Boolean @default(true)
   driftBaseline Float?  // expected delivery-to-billing ratio
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  alerts      Alert[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant        Tenant               @relation(fields: [tenantId], references: [id])
+  project       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  alerts        Alert[]
   driftSnapshots WeeklyDriftSnapshot[]
 }
 
 model WeeklyDriftSnapshot {
   id              String   @id @default(cuid())
+  tenantId        String
   monitoredProjectId String
   weekStart       DateTime
   deliveryHours   Float
@@ -413,14 +523,17 @@ model WeeklyDriftSnapshot {
   zScore          Float?
   createdAt       DateTime @default(now())
 
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
   monitoredProject MonitoredProject @relation(fields: [monitoredProjectId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@unique([monitoredProjectId, weekStart])
   @@index([monitoredProjectId, weekStart])
 }
 
 model Alert {
   id          String   @id @default(cuid())
+  tenantId    String
   monitoredProjectId String
   severity    String   // info|warning|critical
   category    String   // scope_creep|milestone_gap|billing_drift|rate_risk
@@ -431,33 +544,87 @@ model Alert {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  monitoredProject MonitoredProject @relation(fields: [monitoredProjectId], references: [id], onDelete: Cascade)
-  acknowledger     User?            @relation("AcknowledgerAlerts", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  monitoredProject MonitoredProject  @relation(fields: [monitoredProjectId], references: [id], onDelete: Cascade)
+  acknowledger     User?             @relation("AcknowledgerAlerts", fields: [acknowledgedById], references: [id], onDelete: SetNull)
 
+  @@index([tenantId])
   @@index([monitoredProjectId])
   @@index([createdAt])
   @@index([acknowledged])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Live connectors (GitHub / Jira) — production blocker #4 fix.
+// Credentials are AES-256-GCM sealed (src/lib/connectors/crypto.ts); only the
+// sealed blob ever persists. `config` is a JSON string of non-secret fields
+// (owner/repo, JQL, host…) validated per-kind by zod at the API boundary.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ConnectorSource {
+  id                String    @id @default(cuid())
+  tenantId          String
+  projectId         String
+  kind              String    // github|jira
+  config            String    // JSON: non-secret per-kind config
+  credentialsSealed String?   // enc:v1:<iv>:<tag>:<ct> — AES-256-GCM
+  lastSyncAt        DateTime?
+  lastSyncStatus    String?   // ok|error
+  lastSyncSummary   String?
+  createdById       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator  User?    @relation("ConnectorCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([projectId])
+  @@unique([projectId, kind])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-instance rate limiting — companion to src/lib/rate-limit-store.ts.
+// Fixed-window counters keyed (key, windowStart). The sliding behaviour is
+// approximated by weighting the previous window (see the store's docs).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model RateLimitCounter {
+  id          String   @id @default(cuid())
+  key         String
+  windowStart DateTime
+  count       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@unique([key, windowStart])
+  @@index([windowStart])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Immutable audit log — every access, review, export, finding action.
 // Immutability is enforced at the Prisma-client layer via an `extends`
 // client extension in src/lib/db.ts (blocks update/delete on this model).
+// Tenant-stamped so each tenant's trail is visible to that tenant only,
+// while remaining append-only for everyone.
 // ─────────────────────────────────────────────────────────────────────────────
 
 model AuditLog {
   id          String   @id @default(cuid())
+  tenantId    String
   actorId     String?  // FK to User (null = unauthenticated/system)
   actor       String   // email string (kept for backward compat; prefer actorId)
-  action      String   // view|review|approve|dismiss|escalate|export|extract|seed
+  action      String   // view|review|approve|dismiss|escalate|export|extract|seed|ingest|connector_sync|account_activated
   entityType  String?
   entityId    String?
   detail      String?
   requestId   String?  // correlation id from middleware
   createdAt   DateTime @default(now())
 
-  actorUser   User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  tenant     Tenant?  @relation(fields: [tenantId], references: [id])
+  actorUser  User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
+  @@index([tenantId])
   @@index([actor])
   @@index([action])
   @@index([createdAt])

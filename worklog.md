@@ -32,3 +32,26 @@ Work Log:
 Stage Summary:
 - Deliverable restored: download/GAVEL-Production-Readiness-and-Deployment-Plan.docx (36,637 bytes, 21 pp).
 - Deployment verdict reiterated: pilot YES (with HTTPS/real JWT secret/trusted users), real-customer production NO until P0-P3 plan executed.
+
+---
+Task ID: 6
+Agent: Super Z (main agent)
+Task: Implement the optimal solution for all 5 production blockers (SQLite single-instance, tenant isolation, user provisioning, CSV-only ingestion, zero ops) + GitHub/Jira connector attachment.
+
+Work Log:
+- Schema: tenantId (required, FK, indexed) on all 20 data models; User.status/tokenEpoch; ConnectorSource; RateLimitCounter; stable demo ids (demo-tenant, demo-user-*) restored (lost in sandbox reset).
+- Dual-provider data layer: scripts/sync-pg-schema.ts generates committed prisma/schema.postgres.prisma; 0001_init migration (101 DDL statements) via migrate diff; scripts/generate.ts picks client by DATABASE_URL protocol; package scripts (db:push:pg, migrate:deploy, schema:check).
+- Tenant isolation: src/lib/tenant-context.ts (ALS + runWithTenant/runUnscoped + fail-closed), db.ts per-tenant memoized scoped clients behind a Proxy. THREE live-caught bugs fixed en route: (1) Prisma reports PASCALCASE model names in $allOperations (camelCase set silently disabled all scoping); (2) ALS context is lost across Prisma's engine callback boundary under BOTH Bun and Node — fixed by reading tenant at Proxy property-access time (route code) instead of inside the callback; (3) return-vs-return-await trap in withErrorHandler (return runWithTenant(...) without await let every AuthError escape the catch as a raw 500).
+- withErrorHandler: resolves principal (30s TTL cache, src/lib/request-principal.ts), rejects disabled users + epoch mismatches, establishes tenant context; wrapped ALL routes (dashboard/audits/findings/monitoring were unwrapped — live-caught leak).
+- Provisioning: /api/admin/users (GET/POST), [id] (PATCH), [id]/reset-password, /api/auth/invite (accept); purpose tokens (invite 72h / reset 24h); last-admin + self-lockout guards; Team view UI; login page invite mode; create-tenant CLI.
+- Connectors: src/lib/connectors/ (types, AES-256-GCM crypto, github, jira w/ ADF flattening); shared commit layer src/lib/ingest/commit.ts (refactored out of ingest route); /api/connectors (GET/PUT/DELETE) + [id]/sync (dryRun supported); ConnectorPanel UI in intake modal Evidence step.
+- Ops: health ?deep=1; backup.sh/restore.sh (pg_dump + retention); CI extended (schema:check, PG client gen, migration presence); docs/DEPLOYMENT.md; .env.production.example; env.ts additions (GAVEL_RATE_LIMIT_STORE, GAVEL_CONNECTOR_SECRET).
+- Rate limiting: src/lib/rate-limit-store.ts — db-backed fixed-window w/ weighted previous window (multi-instance safe), memory default in dev; login/ingest/sync routes migrated.
+- Tests: 248 passing (15 files) — new suites: tenant-context, request-principal, rate-limit-store, connector-crypto, connectors (GH/Jira mapping + error mapping via injected fetch), provisioning (purpose tokens, policy, epoch), pg-schema-sync.
+- Live verification (scripts/verify-production-fixes.sh): 18/18 PASS — demo login+scoping, tenant-2 bootstrap via CLI, invite accept, tenant isolation (ZERO demo clients, cross-tenant id → 404), viewer provisioning → 403 on admin API → disable → instant 401 revocation, live GitHub sync (1377 activities from vercel/next.js, re-sync idempotent), deep health.
+- Browser verification (agent-browser): landing renders, login works, authenticated shell shows Team nav (admin-gated), Team view renders 3 users with role selects + reset/disable + self-lockout disabled state. Screenshot: /tmp/gavel-team-final.png.
+
+Stage Summary:
+- All 5 production blockers now have working, tested implementations; GAVEL is deployable to real organisations behind HTTPS + real secrets (see docs/DEPLOYMENT.md runbook).
+- GitHub/Jira attachment answer: intake modal → Evidence step → Live connectors panel (owner/repo or host+token, sealed AES-256-GCM) → Sync → same ingestion pipeline as CSV.
+- 3 pre-existing cross-tenant holes found+fixed during verification (unwrapped GET routes, extract-contract clientId, monitoring path ids).

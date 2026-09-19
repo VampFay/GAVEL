@@ -4,6 +4,7 @@ import { ok, notFound, invalidRequest, withErrorHandler } from '@/lib/api'
 import { AckAlertSchema, ToggleMonitoringSchema } from '@/lib/schemas'
 import { getRequestId } from '@/lib/actor'
 import { requireRole } from '@/lib/auth'
+import { currentTenantId } from '@/lib/tenant-context'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,6 +42,11 @@ export const PATCH = withErrorHandler(
     if (action === 'toggle') {
       const parsed = ToggleMonitoringSchema.safeParse(body)
       if (!parsed.success) return invalidRequest(parsed.error)
+      // Tenant guard: scoped read masks cross-tenant rows as null (404).
+      const target = await db.monitoredProject.findUnique({ where: { id }, select: { id: true } })
+      if (!target) return notFound('monitored project not found')
+      const tenantId = currentTenantId()
+      if (!tenantId) return notFound('monitored project not found')
       const updated = await db.$transaction(async tx => {
         const m = await tx.monitoredProject.update({
           where: { id },
@@ -48,6 +54,7 @@ export const PATCH = withErrorHandler(
         })
         await tx.auditLog.create({
           data: {
+            tenantId,
             actorId: actor.id,
             actor: actor.email,
             action: 'toggle_monitoring',
@@ -65,6 +72,11 @@ export const PATCH = withErrorHandler(
     if (action === 'ack' || action === 'unack') {
       const parsed = AckAlertSchema.safeParse(body)
       if (!parsed.success) return invalidRequest(parsed.error)
+      // Tenant guard: scoped read masks cross-tenant rows as null (404).
+      const target = await db.alert.findUnique({ where: { id }, select: { id: true } })
+      if (!target) return notFound('alert not found')
+      const tenantId = currentTenantId()
+      if (!tenantId) return notFound('alert not found')
       const updated = await db.$transaction(async tx => {
         const a = await tx.alert.update({
           where: { id },
@@ -76,6 +88,7 @@ export const PATCH = withErrorHandler(
         })
         await tx.auditLog.create({
           data: {
+            tenantId,
             actorId: actor.id,
             actor: actor.email,
             action: action === 'ack' ? 'ack_alert' : 'unack_alert',

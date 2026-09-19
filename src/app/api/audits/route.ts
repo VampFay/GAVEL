@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { ok } from '@/lib/api'
+import { ok, withErrorHandler } from '@/lib/api'
 import { money, sumMoney } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
@@ -24,7 +24,7 @@ export const dynamic = 'force-dynamic'
  *     when auth is wired (per the §10 plan) and only for callers with
  *     a `reviewer` or `admin` role.
  */
-export async function GET() {
+export const GET = withErrorHandler(async () => {
   const clients = await db.client.findMany({
     select: {
       id: true,
@@ -111,4 +111,4 @@ export async function GET() {
   })
 
   return ok({ audits })
-}
+})
