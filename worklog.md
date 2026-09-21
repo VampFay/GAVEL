@@ -130,3 +130,17 @@ Stage Summary:
 - Local repo: complete and clean at 9da391f + this commit; nothing pending.
 - Remote verification: NOT possible from inside the sandbox (private repo + no credentials). User should confirm the GitHub UI shows the latest commit as 9da391f ("bdc89d50-…", Sep 21 ~15:50 UTC) or later.
 - Guaranteed direct sync path if needed: GAVEL_GH_TOKEN=<PAT> bash scripts/push-github.sh (askpass-based, token never in argv/files/URL; verifies repo via API, pushes, verifies result).
+
+---
+Task ID: gh-sync-attempt-20260921
+Agent: Super Z (main agent)
+Task: User supplied a fine-grained PAT to push the sandbox to github.com/VampFay/GAVEL.
+
+Work Log:
+- Token passed via env var only (askpass helper / curl -K stdin per push-github.sh guarantees); never written to disk, argv, or URLs. Temp artifacts removed.
+- Diagnosis: token authenticates as VampFay (API /user 200) and is structurally valid (93 chars), BUT /repos/VampFay/GAVEL returns 404 for the authenticated owner and git fetch returns 403 "Write access to repository not granted" — the fine-grained PAT was generated WITHOUT repository access to VampFay/GAVEL (or without the Contents permission). GitHub hides private repos from tokens that have no grant (404, not 403).
+- No push possible; no data written anywhere remote. Token use abandoned; user advised to revoke it (it was pasted in plaintext chat) and issue a new one with: Repository access → Only select repositories → VampFay/GAVEL; Permissions → Contents: Read and write.
+- Reminder of remote state (from user's screenshot, 21:38 local): remote main = 107c584 "motion system v2" (~2 weeks old, 20 commits); local main = 03d8c01 (36 commits, 2 weeks further evolution incl. all 5 production blockers + today's hardening/sweep). Histories diverged — force-push of local remains the recommended sync strategy.
+
+Stage Summary:
+- Blocker: PAT lacks repo access (not a GAVEL-side issue). Local remains complete and ready at 03d8c01; push script verified end-to-end except the final permission grant.
