@@ -59,8 +59,8 @@ export const unbilledOverageRule: Rule = {
         //   2. deterministic token overlap between the change order text
         //      (title + description) and the capped line item's description —
         //      an unrelated CO ("UI redesign phase 2") must never suppress a
-        //      records-migration overage. (Fuzzy matching is the §9.1
-        //      embedding half — TODO.)
+        //      records-migration overage. (Fuzzy matching across synonyms is
+        //      the planned §9.1 embedding-based upgrade.)
         const hasCoveringChangeOrder = input.changeOrders.some(
           co =>
             sharedTokens(`${co.title} ${co.description}`, li.description).length > 0 &&

@@ -308,6 +308,14 @@ async function logout() {
 function ReSeedButton() {
   const [busy, setBusy] = useState(false)
 
+  // Demo affordance: dev builds only, unless a demo deployment explicitly
+  // opts in via NEXT_PUBLIC_ENABLE_RESEED=true. In production builds the
+  // backing /api/seed route 404s — a dead button there would be worse
+  // than no button. (Inline-consts: both are build-time inlined.)
+  const enabled =
+    process.env.NODE_ENV !== 'production' ||
+    process.env.NEXT_PUBLIC_ENABLE_RESEED === 'true'
+
   const reseed = async () => {
     setBusy(true)
     try {
@@ -325,6 +333,8 @@ function ReSeedButton() {
       setBusy(false)
     }
   }
+
+  if (!enabled) return null
 
   return (
     <Button
