@@ -106,7 +106,7 @@ async function main() {
   )
 
   console.log('\nPhase 2 — stale-session guard: a valid token for a NONEXISTENT user')
-  const ghostToken = signToken({ sub: 'user-that-was-deleted', email: 'ghost@gavel.demo', role: 'admin' })
+  const ghostToken = signToken({ sub: 'user-that-was-deleted', email: 'ghost@gavel.demo', role: 'admin', epoch: 1 })
   const ghostCookie = `gavel_token=${ghostToken}`
   const c3 = await createClient(ghostCookie)
   check(

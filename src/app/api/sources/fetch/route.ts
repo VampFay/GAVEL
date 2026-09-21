@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { ok, invalidRequest, withErrorHandler } from '@/lib/api'
 import { SourceFetchSchema } from '@/lib/schemas'
 import { getRequestId } from '@/lib/actor'

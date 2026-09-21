@@ -48,8 +48,19 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "warn",
   },
 }, {
+  files: ["scripts/**/*.js"],
+  rules: {
+    // Plain-JS utility scripts (changelog, render-og, …) are CommonJS by
+    // design — they run under plain `node`, same rationale as the plan-gen
+    // ignore below. Keep every other rule; only allow require().
+    "@typescript-eslint/no-require-imports": "off",
+  },
+}, {
   ignores: [
     "node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "skills",
+    // Quarantined dead scaffold (unreferenced shadcn/ui components, legacy
+    // experiments) — excluded from lint AND tsconfig for the same reason.
+    "scripts/orphaned/**",
     // One-shot document generation scripts (CommonJS by design — they run
     // under plain `node`, not the app's ESM toolchain).
     "scripts/plan-gen/**",

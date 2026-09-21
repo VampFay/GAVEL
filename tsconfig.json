@@ -28,5 +28,5 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "tests/**", "skills/**", "examples/**"]
+  "exclude": ["node_modules", "tests/**", "skills/**", "examples/**", "scripts/orphaned/**"]
 }

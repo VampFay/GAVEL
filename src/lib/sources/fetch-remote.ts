@@ -48,14 +48,18 @@ function ipv4ToInt(ip: string): number | null {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip)
   if (!m) return null
   const parts = m.slice(1).map(Number)
-  if (parts.some(p => p > 255)) return null
-  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0
+  if (parts.length !== 4 || parts.some(p => !Number.isInteger(p) || p < 0 || p > 255)) return null
+  const [a = 0, b = 0, c = 0, d = 0] = parts
+  return ((a << 24) | (b << 16) | (c << 8) | d) >>> 0
 }
 
 /** True when the address is private, loopback, link-local, or reserved. */
 export function isPrivateAddress(host: string): boolean {
+  // NOTE: WHATWG URL.hostname KEEPS the brackets on IPv6 literals
+  // ("[::1]"), while dns.lookup returns bare addresses — normalize first.
+  const bare = host.replace(/^\[|\]$/g, '')
   // IPv4 literals
-  const v4 = ipv4ToInt(host)
+  const v4 = ipv4ToInt(bare)
   if (v4 !== null) {
     const ranges: Array<[number, number]> = [
       [0x00000000, 0x00000000], // 0.0.0.0/8
@@ -65,20 +69,21 @@ export function isPrivateAddress(host: string): boolean {
       [0xA9FE0000, 0xA9FEFFFF], // 169.254.0.0/16
       [0xAC100000, 0xAC1FFFFF], // 172.16.0.0/12
       [0xC0A80000, 0xC0A8FFFF], // 192.168.0.0/16
-      [0xBFC00000, 0xBFDFFFFF], // 198.18.0.0/15
+      [0xC6120000, 0xC613FFFF], // 198.18.0.0/15 (RFC 2544 benchmarking)
       [0xE0000000, 0xFFFFFFFF], // 224.0.0.0/4 + 240.0.0.0/4
     ]
     return ranges.some(([lo, hi]) => v4 >= lo && v4 <= hi)
   }
-  // IPv6 literals (brackets stripped by URL.hostname)
-  const v6 = host.toLowerCase()
+  // IPv6 (brackets already stripped above)
+  const v6 = bare.toLowerCase()
   if (v6 === '::1' || v6 === '::') return true
   if (v6.startsWith('fc') || v6.startsWith('fd')) return true // fc00::/7 ULA
   if (v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')) return true // link-local
   if (v6.startsWith('ff')) return true // multicast
   // IPv4-mapped (::ffff:10.0.0.1) — validate the embedded v4
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v6)
-  if (mapped) return isPrivateAddress(mapped[1])
+  const embedded = mapped?.[1]
+  if (embedded) return isPrivateAddress(embedded)
   return false
 }
 
@@ -197,7 +202,7 @@ export interface FetchedText {
 
 function isTextualContentType(ct: string | null): boolean {
   if (!ct) return true // no header — give it the benefit of the doubt
-  const base = ct.split(';')[0].trim().toLowerCase()
+  const base = (ct.split(';')[0] ?? '').trim().toLowerCase()
   return (
     base.startsWith('text/') ||
     base === 'application/json' ||
