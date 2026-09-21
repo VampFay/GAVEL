@@ -144,3 +144,23 @@ Work Log:
 
 Stage Summary:
 - Blocker: PAT lacks repo access (not a GAVEL-side issue). Local remains complete and ready at 03d8c01; push script verified end-to-end except the final permission grant.
+
+---
+Task ID: gh-sync-complete-20260921
+Agent: Super Z (main agent)
+Task: User granted the PAT repo access + workflow scope; execute and verify the full GitHub sync.
+
+Work Log:
+- Fetched remote (now accessible): remote main was 107c584 "motion system v2"; merge-base with local = 9b62f0d; histories diverged.
+- Analyzed remote's unique commit 107c584: 18 files, +757/-108 — motion system v2 (reveal.tsx, verdict-flash.tsx, use-in-view hook, store changes). Discovered the sandbox had only ever received PARTIAL artifacts of this work (verdict-flash.tsx without its app-store changes — precisely why it failed typecheck and was quarantined during the readiness sweep).
+- Confirmed 0f8e592 (remote) ≡ 2a68a33 (local) by tree identity — re-commit of the sandbox rebuild, not unique work.
+- Preservation: pushed remote tip as archive/motion-system-v2 branch on GitHub BEFORE force-push (verified: branch exists, points at 107c584).
+- First main push attempt rejected by GitHub (PAT lacked workflow scope for .github/workflows/ci.yml changes); user added Workflows: read+write.
+- Force-push succeeded: 107c584...f718d07 (forced update), exit 0.
+- API verification (independent of git): remote main tip = f718d07, dated 2026-09-21T16:26:36Z; branches = main (f718d07) + archive/motion-system-v2 (107c584). Local main = f718d07. Exact match.
+- Token used via env/askpass only throughout; no persistence anywhere.
+
+Stage Summary:
+- SYNCED: github.com/VampFay/GAVEL main = local main = f718d07 (36 commits, full 2-week evolution + all 5 production blockers + today's hardening/sweep).
+- Remote's unique motion-v2 work preserved at archive/motion-system-v2 (recoverable for cherry-pick; note: it is based on a tree before the professional-readiness sweep — its verdict-flash/app-store parts need adaptation, not blind merge).
+- Recommended follow-up: user should revoke the PAT after this session (exposed in plaintext chat) — or at minimum it expires unused.
