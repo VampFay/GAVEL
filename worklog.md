@@ -96,3 +96,21 @@ Stage Summary:
 - "All perfect?" answer: NOW yes — the link-service feature is complete, tested, hardened (2 SSRF bugs fixed), and every CI gate is green.
 - Ingestion story is fully dual-path: contract side (Paste/Upload/Link-URL/Link-GitHub via /api/sources/fetch) + delivery side (saved GitHub/Jira connectors in the Evidence step).
 - Quarantine inventory: scripts/orphaned/ = SHIPLEDGER middleware, verdict-flash, 34 ui components, use-toast. All recoverable via git.
+
+---
+Task ID: professional-readiness-sweep-20260921
+Agent: Super Z (main agent)
+Task: User demanded a full professional-readiness audit: no hardcoded paths, no unprofessional artifacts, tool ready for professional use — else state why.
+
+Work Log:
+- Swept: absolute paths (clean — only a comment documenting a past fix), committed secrets (clean — .env ignored, only .env.example tracked), profanity/placeholder copy (clean), console.log debris (only src/lib/logger.ts, correct), dev fallbacks (all fail-loud-in-production patterns with GAVEL_REQUIRE_AUTH escape hatch), LICENSE ("UNLICENSED" + proprietary README note), "private": true.
+- Found + purged 22,592 lines of debris (105 files, commit de65cba): 45 scraped Apple/9to5 news files + 4 HTML dumps from unrelated web-research sessions, 3 MB vendored yt-dlp binary, dead SHIPLEDGER product code (15 components + lib + 32-test suite — zero importers, live gavel equivalents exist), examples/websocket scaffold, plan-gen/_docx_tmp temp XML, live-final-test r1-r6 iterations (superseded by verify-production-fixes.sh), rename-gavel.sh one-shot, render-og.js stale duplicate of render-og.mjs.
+- Fixed materially stale README: status paragraph claimed tenancy/connectors/PG "pending" and "do not share between customers" — all shipped in ae45fad. Rewrote status, stack, env table, scripts table (also removed the never-existed db:reset row), verification list, ingestion (now documents all 3 paths incl. SSRF-guarded source fetch), security posture (tenancy, provisioning/revocation, credential sealing, db rate-limit store).
+- Created .env.production.example — DEPLOYMENT.md had referenced it since ae45fad but the file never existed (worklog Task 6 claim was wrong). All 10 sanctioned vars documented with openssl generation commands. .env.example gained the 2 missing vars (GAVEL_RATE_LIMIT_STORE, GAVEL_CONNECTOR_SECRET).
+- Gated the "Reset demo" button: was unconditionally rendered; production builds hit a 404ing route. Now hidden unless dev build or explicit NEXT_PUBLIC_ENABLE_RESEED=true (build-time inlined). Verified still visible in dev.
+- Rephrased the one TODO marker (unbilled-overage.ts) into a documented planned upgrade.
+- Gates after sweep: typecheck 0, lint 0 errors, 276/276 tests (16 files), schema:check in sync, live smoke green (health/login/tenant-scoped findings), dev UI zero page errors.
+
+Stage Summary:
+- Verdict: repository is now professional-grade for a private B2B deployment. Remaining honest caveats (NOT blockers, documented): LLM extraction depends on the Z.ai build environment's SDK credentials (no standalone key provisioning yet); connector/source-fetch pull quotas are subject to upstream API rate limits (PAT raises them); single-license proprietary repo without a LICENSE file (npm UNLICENSED convention is set).
+- All removals are recoverable from git history (de65cba parent).
