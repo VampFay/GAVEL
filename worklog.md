@@ -114,3 +114,19 @@ Work Log:
 Stage Summary:
 - Verdict: repository is now professional-grade for a private B2B deployment. Remaining honest caveats (NOT blockers, documented): LLM extraction depends on the Z.ai build environment's SDK credentials (no standalone key provisioning yet); connector/source-fetch pull quotas are subject to upstream API rate limits (PAT raises them); single-license proprietary repo without a LICENSE file (npm UNLICENSED convention is set).
 - All removals are recoverable from git history (de65cba parent).
+
+---
+Task ID: gh-sync-verify-20260921
+Agent: Super Z (main agent)
+Task: User asked to make sure everything is synced with github.com/VampFay/GAVEL.
+
+Work Log:
+- Verified working tree: clean, zero uncommitted changes. Local main HEAD = 9da391f, containing the complete session chain: ae45fad (5-blocker production work) → df7c200 (link-service/source-fetch feature) → 9acc21a (SSRF hardening + CI gate closure) → 24b0b8b (platform checkpoint) → de65cba (professional-readiness sweep, -22,592 lines) → 9da391f (platform checkpoint).
+- Remote reachability audit: remote is PRIVATE (git prompts 401; HTML probe 404 for anonymous). No credentials exist inside the sandbox: no GAVEL_GH_TOKEN in env, no gh CLI, no SSH keys, no stored PAT (grep only matched test-fixture strings), and the anonymous GitHub API quota for this IP is exhausted (403). refs/remotes/origin/* is absent and the shell-side reflog shows zero fetch/pull/push events ever — direct git sync from inside the sandbox is impossible without a user-supplied token.
+- Established the actual sync channel: platform-side auto-sync — UUID-titled checkpoint commits under the user's GitHub identity (24b0b8b at 15:21:49, 9da391f at 15:50:05) fire minutes after each completed work unit and capture dirty state (both contained exactly this session's worklog appends). This mechanism, operating outside the shell, is what mirrors the sandbox to VampFay/GAVEL.
+- Committed this verification record so the branch tip is fully self-contained for any push mechanism.
+
+Stage Summary:
+- Local repo: complete and clean at 9da391f + this commit; nothing pending.
+- Remote verification: NOT possible from inside the sandbox (private repo + no credentials). User should confirm the GitHub UI shows the latest commit as 9da391f ("bdc89d50-…", Sep 21 ~15:50 UTC) or later.
+- Guaranteed direct sync path if needed: GAVEL_GH_TOKEN=<PAT> bash scripts/push-github.sh (askpass-based, token never in argv/files/URL; verifies repo via API, pushes, verifies result).
