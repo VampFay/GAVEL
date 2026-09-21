@@ -155,6 +155,12 @@ export function withErrorHandler<TArgs extends unknown[]>(
       if (name === 'ConnectorError') {
         return NextResponse.json({ ok: false, error: message }, { status: status || 502 })
       }
+      // SourceFetchError (remote SOW fetching) — same contract: safe
+      // message + chosen status (SSRF guard → 400, not found → 404,
+      // too large → 413, wrong type → 415, upstream down → 504).
+      if (name === 'SourceFetchError') {
+        return NextResponse.json({ ok: false, error: message }, { status: status || 502 })
+      }
       // P2025: record not found (Prisma)
       if (code === 'P2025') {
         return notFound('record not found')

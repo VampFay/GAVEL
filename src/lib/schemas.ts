@@ -83,3 +83,32 @@ export const ToggleMonitoringSchema = z.object({
   alertsEnabled: z.boolean(),
 })
 export type ToggleMonitoring = z.infer<typeof ToggleMonitoringSchema>
+
+// ───────────────────────── Remote source fetch (SOW intake) ─────────
+// POST /api/sources/fetch — pull contract text from a published URL or
+// a GitHub repo file instead of pasting it. See src/lib/sources/.
+
+export const SourceFetchUrlSchema = z.object({
+  kind: z.literal('url'),
+  url: z
+    .string()
+    .trim()
+    .min(8, 'url required')
+    .max(2048)
+    .regex(/^https:\/\//i, 'only https:// URLs can be fetched'),
+})
+
+export const SourceFetchGithubSchema = z.object({
+  kind: z.literal('github'),
+  owner: z.string().trim().min(1, 'owner required').max(100),
+  repo: z.string().trim().min(1, 'repo required').max(150),
+  path: z.string().trim().min(1, 'file path required').max(500),
+  ref: z.string().trim().min(1).max(200).optional(),
+  token: z.string().trim().min(1).max(400).optional(),
+})
+
+export const SourceFetchSchema = z.discriminatedUnion('kind', [
+  SourceFetchUrlSchema,
+  SourceFetchGithubSchema,
+])
+export type SourceFetch = z.infer<typeof SourceFetchSchema>

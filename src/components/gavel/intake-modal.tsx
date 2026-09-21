@@ -15,8 +15,10 @@ import {
   FileText, GitBranch, ClipboardList, Loader2,
   CheckCircle2, ArrowRight, ArrowLeft, Sparkles, X,
   IndianRupee, Building2, AlertCircle, Upload,
+  Link2, Globe, Github, FileUp, AlertTriangle,
 } from 'lucide-react'
 import { formatINR, formatDate } from '@/lib/gavel'
+import { apiPost } from '@/lib/fetch'
 import { ConnectorPanel } from './connector-panel'
 
 interface Client {
@@ -69,6 +71,15 @@ Currency: INR
   5.1 Hardware procurement is NOT in scope.
   5.2 Warehouse-floor networking is billed separately.`
 
+/** Where the SOW text came from — recorded on the contract as a
+ *  provenance header and shown as a badge so the evidence chain is
+ *  self-documenting (fetched/uploaded vs hand-pasted). */
+interface SowProvenance {
+  kind: 'url' | 'github' | 'upload'
+  label: string
+  bytes: number
+}
+
 type Step = 'client' | 'sow' | 'extracting' | 'review' | 'delivery' | 'engine' | 'done'
 
 export function IntakeModal() {
@@ -80,6 +91,7 @@ export function IntakeModal() {
   const [newClientName, setNewClientName] = useState('')
   const [newClientIndustry, setNewClientIndustry] = useState('')
   const [sowText, setSowText] = useState('')
+  const [provenance, setProvenance] = useState<SowProvenance | null>(null)
   const [extracted, setExtracted] = useState<ExtractedContract | null>(null)
   const [contractId, setContractId] = useState<string | null>(null)
   const [extractErr, setExtractErr] = useState<string | null>(null)
@@ -92,6 +104,7 @@ export function IntakeModal() {
       setContractId(null)
       setExtractErr(null)
       setSowText('')
+      setProvenance(null)
       setNewClientName('')
       setNewClientIndustry('')
       setSelectedClientId('')
@@ -117,11 +130,18 @@ export function IntakeModal() {
 
     setStep('extracting')
     setExtractErr(null)
+    // Provenance header: flows into contract.rawText so the stored
+    // evidence self-documents its origin. Deliberately timestamp-free —
+    // identical fetches produce identical rawText, preserving the
+    // extract route's idempotency (same text → same contract).
+    const rawText = provenance
+      ? `[Imported from ${provenance.label}]\n\n${sowText}`
+      : sowText
     try {
       const res = await fetch('/api/extract-contract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rawText: sowText, clientId, persist: true }),
+        body: JSON.stringify({ rawText, clientId, persist: true }),
       })
       const d = await res.json()
       if (d.ok) {
@@ -161,7 +181,12 @@ export function IntakeModal() {
 
   return (
     <Dialog open={intakeOpen} onOpenChange={(o) => { if (!o) closeIntake() }}>
-      <DialogContent className="max-w-3xl max-h-[90vh] p-0 gap-0 overflow-hidden">
+      {/* NOTE: width must be sm:max-w-3xl (not bare max-w-3xl) — the base
+         DialogContent class ships `sm:max-w-lg`, and tailwind-merge only
+         dedupes within the same variant group. Bare max-w-3xl loses to
+         sm:max-w-lg at ≥640px viewports and the modal silently renders at
+         512px, clipping the stepper and squeezing every step. */}
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] p-0 gap-0 overflow-hidden">
         <DialogHeader className="px-6 py-4 border-b border-border bg-muted/30">
           <div className="flex items-center justify-between">
             <div>
@@ -201,7 +226,9 @@ export function IntakeModal() {
               <SowStep
                 sowText={sowText}
                 setSowText={setSowText}
-                onLoadSample={() => setSowText(SAMPLE_SOW)}
+                provenance={provenance}
+                setProvenance={setProvenance}
+                onLoadSample={() => { setSowText(SAMPLE_SOW); setProvenance(null) }}
                 onBack={() => setStep('client')}
                 onNext={startExtraction}
               />
@@ -410,7 +437,7 @@ function ClientStep({
           disabled={!useExisting && !newClientName.trim()}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
-          Next: paste SOW
+          Next: provide SOW
           <ArrowRight className="h-3.5 w-3.5 ml-1" />
         </Button>
       </div>
@@ -418,36 +445,310 @@ function ClientStep({
   )
 }
 
+type SourceMode = 'paste' | 'upload' | 'link'
+
+const fmtBytes = (n: number): string =>
+  n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`
+
 function SowStep({
-  sowText, setSowText, onLoadSample, onBack, onNext,
+  sowText, setSowText, onLoadSample, onBack, onNext, provenance, setProvenance,
 }: {
   sowText: string
   setSowText: (s: string) => void
   onLoadSample: () => void
   onBack: () => void
   onNext: () => void
+  provenance: SowProvenance | null
+  setProvenance: (p: SowProvenance | null) => void
 }) {
+  const [mode, setMode] = useState<SourceMode>('paste')
+  const [linkKind, setLinkKind] = useState<'url' | 'github'>('url')
+  const [fetching, setFetching] = useState(false)
+  const [fetchErr, setFetchErr] = useState<string | null>(null)
+
+  // url fields
+  const [url, setUrl] = useState('')
+
+  // github fields
+  const [ghOwner, setGhOwner] = useState('')
+  const [ghRepo, setGhRepo] = useState('')
+  const [ghPath, setGhPath] = useState('')
+  const [ghRef, setGhRef] = useState('')
+  const [ghToken, setGhToken] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  interface FetchResponse {
+    text: string
+    source: { kind: string; label: string; bytes: number }
+  }
+
+  async function runFetch(body: Record<string, unknown>) {
+    setFetching(true)
+    setFetchErr(null)
+    const { data, error } = await apiPost<FetchResponse>('/api/sources/fetch', body)
+    setFetching(false)
+    if (error || !data) {
+      setFetchErr(error?.message ?? 'fetch failed')
+      toast.error('Could not fetch source', { description: error?.message ?? 'unknown error' })
+      return
+    }
+    setSowText(data.text)
+    setProvenance({
+      kind: data.source.kind === 'url' ? 'url' : 'github',
+      label: data.source.label,
+      bytes: data.source.bytes,
+    })
+    toast.success('Source fetched', {
+      description: `${fmtBytes(data.source.bytes)} — review the text below, then extract.`,
+    })
+  }
+
+  async function onFile(f: File) {
+    if (f.size > 2 * 1024 * 1024) {
+      toast.error('File too large', { description: 'keep SOW text files under 2 MB' })
+      return
+    }
+    try {
+      const text = await f.text()
+      setSowText(text)
+      setProvenance({ kind: 'upload', label: f.name, bytes: f.size })
+      toast.success('File loaded', { description: `${f.name} · ${fmtBytes(f.size)} — editable below.` })
+    } catch {
+      toast.error('Could not read file')
+    }
+  }
+
+  const urlFetchDisabled = fetching || !url.trim().startsWith('https://')
+  const ghFetchDisabled = fetching || !ghOwner.trim() || !ghRepo.trim() || !ghPath.trim()
+
+  const MODES: Array<{ id: SourceMode; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+    { id: 'paste', label: 'Paste text', icon: FileText },
+    { id: 'upload', label: 'Upload file', icon: FileUp },
+    { id: 'link', label: 'Link service / URL', icon: Link2 },
+  ]
+
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-medium">2. Paste the SOW / contract text</h3>
-          <p className="text-xs text-muted-foreground mt-1">
-            The LLM will extract scope items, rate card, milestones, and exclusions into a strict JSON schema.
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={onLoadSample}>
-          <FileText className="h-3.5 w-3.5 mr-1" />
-          Load sample SOW
-        </Button>
+      <h3 className="text-sm font-medium">2. Provide the SOW / contract</h3>
+      <p className="text-xs text-muted-foreground mt-1">
+        Pull it from where it already lives — a published URL, a GitHub repo file, or a
+        text upload — or paste it. However it arrives, the text below stays editable and
+        a human reviews the extraction before anything is asserted.
+      </p>
+
+      {/* ── Source mode tabs ─────────────────────────────────────────── */}
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {MODES.map(m => {
+          const active = m.id === mode
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => { setMode(m.id); setFetchErr(null) }}
+              className={`flex items-center gap-1.5 rounded-lg border p-2.5 text-xs transition-colors ${
+                active
+                  ? 'border-primary bg-primary/5 text-foreground'
+                  : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground'
+              }`}
+            >
+              <m.icon className={`h-3.5 w-3.5 shrink-0 ${active ? 'text-primary' : ''}`} />
+              <span className="font-medium truncate">{m.label}</span>
+            </button>
+          )
+        })}
       </div>
 
+      {/* ── Mode affordances ─────────────────────────────────────────── */}
+      {mode === 'paste' && (
+        <div className="mt-3 flex justify-end">
+          <Button variant="outline" size="sm" onClick={onLoadSample}>
+            <FileText className="h-3.5 w-3.5 mr-1" />
+            Load sample SOW
+          </Button>
+        </div>
+      )}
+
+      {mode === 'upload' && (
+        <div className="mt-3">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".txt,.md,.markdown,.csv,.json,.text,text/*"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0]
+              if (f) void onFile(f)
+              e.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="w-full flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-muted/30 transition-colors py-7 px-4"
+          >
+            <FileUp className="h-5 w-5 text-muted-foreground" />
+            <span className="text-xs font-medium">Choose a text file</span>
+            <span className="text-[10px] text-muted-foreground">
+              .txt · .md · .csv · .json — read locally in your browser, up to 2 MB
+            </span>
+          </button>
+        </div>
+      )}
+
+      {mode === 'link' && (
+        <div className="mt-3 rounded-lg border bg-muted/20 p-3">
+          {/* Link sub-tabs: URL | GitHub */}
+          <div className="grid grid-cols-2 gap-2">
+            {(['url', 'github'] as const).map(k => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => { setLinkKind(k); setFetchErr(null) }}
+                className={`flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs transition-colors ${
+                  linkKind === k
+                    ? 'border-primary bg-primary/5 text-foreground font-medium'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {k === 'url' ? <Globe className="h-3.5 w-3.5" /> : <Github className="h-3.5 w-3.5" />}
+                {k === 'url' ? 'Published URL' : 'GitHub repo file'}
+              </button>
+            ))}
+          </div>
+
+          {linkKind === 'url' ? (
+            <div className="mt-3 space-y-2">
+              <Label htmlFor="sow-url" className="text-xs">
+                https:// URL of the SOW text
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="sow-url"
+                  placeholder="https://docs.google.com/document/d/…/pub  ·  https://confluence…  ·  any raw text link"
+                  value={url}
+                  onChange={e => setUrl(e.target.value)}
+                  className="num text-xs"
+                />
+                <Button
+                  size="sm"
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+                  disabled={urlFetchDisabled}
+                  onClick={() => void runFetch({ kind: 'url', url: url.trim() })}
+                >
+                  {fetching ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Globe className="h-3.5 w-3.5 mr-1" />}
+                  Fetch
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Server-side fetch with SSRF guards (https-only, private networks blocked,
+                2 MB cap). HTML pages are stripped to text; PDFs/DOCX must be converted
+                or uploaded as text first.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="gh-o" className="text-xs">Owner / org</Label>
+                  <Input id="gh-o" placeholder="acme-corp" value={ghOwner}
+                    onChange={e => setGhOwner(e.target.value)} className="num text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="gh-r" className="text-xs">Repository</Label>
+                  <Input id="gh-r" placeholder="vendor-contracts" value={ghRepo}
+                    onChange={e => setGhRepo(e.target.value)} className="num text-xs" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="gh-p" className="text-xs">File path</Label>
+                  <Input id="gh-p" placeholder="docs/sow-2025.md" value={ghPath}
+                    onChange={e => setGhPath(e.target.value)} className="num text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="gh-b" className="text-xs">
+                    Branch / tag <span className="text-muted-foreground/60">(optional)</span>
+                  </Label>
+                  <Input id="gh-b" placeholder="main" value={ghRef}
+                    onChange={e => setGhRef(e.target.value)} className="num text-xs" />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="gh-t" className="text-xs">
+                  Personal access token <span className="text-muted-foreground/60">(optional — public repos work without)</span>
+                </Label>
+                <Input id="gh-t" type="password" placeholder="ghp_… (used once for this fetch, never stored)"
+                  value={ghToken} onChange={e => setGhToken(e.target.value)} className="num text-xs" />
+              </div>
+              <Button
+                size="sm"
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+                disabled={ghFetchDisabled}
+                onClick={() =>
+                  void runFetch({
+                    kind: 'github',
+                    owner: ghOwner.trim(),
+                    repo: ghRepo.trim(),
+                    path: ghPath.trim().replace(/^\/+/, ''),
+                    ...(ghRef.trim() ? { ref: ghRef.trim() } : {}),
+                    ...(ghToken.trim() ? { token: ghToken.trim() } : {}),
+                  })
+                }
+              >
+                {fetching ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Github className="h-3.5 w-3.5 mr-1" />}
+                Fetch file from GitHub
+              </Button>
+              <p className="text-[10px] text-muted-foreground">
+                Same GitHub API access as the Evidence-step connectors — the token is
+                used for this single request and never persisted (saved connectors seal
+                theirs with AES-256-GCM).
+              </p>
+            </div>
+          )}
+
+          {fetchErr && (
+            <div className="mt-2 flex items-start gap-1.5 rounded border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/20 p-2 text-xs">
+              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0 text-rose-600 dark:text-rose-300" />
+              <span className="text-rose-700 dark:text-rose-300">{fetchErr}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Provenance badge ─────────────────────────────────────────── */}
+      {provenance && (
+        <div className="mt-3 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          {provenance.kind === 'github' ? <Github className="h-3 w-3" /> : provenance.kind === 'url' ? <Globe className="h-3 w-3" /> : <FileUp className="h-3 w-3" />}
+          <span className="num truncate max-w-[85%]">
+            imported from <span className="text-foreground font-medium">{provenance.label}</span> · {fmtBytes(provenance.bytes)}
+          </span>
+          <button
+            type="button"
+            className="ml-auto shrink-0 text-primary underline underline-offset-2"
+            onClick={() => setProvenance(null)}
+            title="Drop the origin note (the text below stays)"
+          >
+            clear origin
+          </button>
+        </div>
+      )}
+
+      {/* ── The (always editable) review textarea ───────────────────── */}
       <Textarea
         value={sowText}
         onChange={(e) => setSowText(e.target.value)}
-        placeholder="Paste the full SOW text here — section headings, scope items, rate card, milestones, change-order policy, exclusions…"
+        placeholder={
+          mode === 'paste'
+            ? 'Paste the full SOW text here — section headings, scope items, rate card, milestones, change-order policy, exclusions…'
+            : 'Fetched / uploaded text lands here for review — or paste directly if you switch modes.'
+        }
         rows={14}
-        className="mt-4 font-mono text-xs"
+        // field-sizing-fixed overrides the base `field-sizing-content`:
+        // auto-sizing inside Radix ScrollArea's display:table viewport lets
+        // the textarea expand to its longest unwrapped line, clipping
+        // milestone amounts at the dialog edge. Fixed sizing restores
+        // soft-wrap + the rows height + an internal scrollbar.
+        className="mt-3 font-mono text-xs field-sizing-fixed resize-y"
       />
 
       <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
