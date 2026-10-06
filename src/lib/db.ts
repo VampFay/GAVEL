@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { PrismaClient, type AuditLog } from '@prisma/client'
 
 import { getTenantContext, TenantContextError } from './tenant-context'
@@ -15,7 +16,22 @@ const logLevel: ('query' | 'error' | 'warn')[] =
   process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error', 'warn']
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tenant scoping (production blocker #2)
+// Provider detection (WP 1.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * True when the runtime DATABASE_URL targets PostgreSQL — i.e. when the
+ * database-level RLS layer (migration 0002) exists and every scoped
+ * operation must carry the transaction-local app.current_tenant_id.
+ * SQLite (dev/test) keeps the single-layer application scoping.
+ */
+function isPostgresRuntime(): boolean {
+  const url = process.env.DATABASE_URL ?? ''
+  return url.startsWith('postgres://') || url.startsWith('postgresql://')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tenant scoping (production blocker #2 + WP 1.1 RLS integration)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -28,6 +44,8 @@ const logLevel: ('query' | 'error' | 'warn')[] =
  *
  * NOTE: these are the model names as Prisma reports them in extension
  * params — the PASCALCASE schema names ("Client", "FindingEvidence").
+ * tests/unit/db-scoping.test.ts asserts schema ↔ set ↔ RLS-migration
+ * parity, so a new tenant model fails CI until all three agree.
  */
 const SCOPED_MODELS = new Set<string>([
   'Client',
@@ -49,6 +67,7 @@ const SCOPED_MODELS = new Set<string>([
   'WeeklyDriftSnapshot',
   'Alert',
   'ConnectorSource',
+  'SyncJob',
   'AuditLog',
 ])
 
@@ -74,7 +93,20 @@ type AnyArgs = Record<string, any>
  * but belongs to another tenant, behave exactly as "not found" — null for
  * findUnique, a P2025-shaped error for findUniqueOrThrow (withErrorHandler
  * maps it to 404). The row never crosses the tenant boundary.
+ *
+ * Projection guard (latent-bug fix, surfaced by WP 1.2's jobs route): a
+ * findUnique with `select: { id: true }` returns a row WITHOUT a tenantId
+ * field — the mask must not misread that as a cross-tenant row. The fix:
+ * when a projection exists, tenantId is force-added to it so the check
+ * always has the evidence it needs. The extra field on the result is
+ * inert (callers select narrow fields for payloads, not for secrecy).
  */
+function ensureTenantIdSelected(a: AnyArgs): void {
+  if (a.select && typeof a.select === 'object' && !Array.isArray(a.select)) {
+    if (a.select.tenantId === undefined) a.select = { ...a.select, tenantId: true }
+  }
+}
+
 function maskCrossTenantResult(operation: string, result: unknown, tenantId: string): unknown {
   if (result === null || result === undefined) return result
   const row = result as { tenantId?: string | null }
@@ -84,6 +116,67 @@ function maskCrossTenantResult(operation: string, result: unknown, tenantId: str
   }
   return null
 }
+
+/**
+ * Apply the application-layer tenant filter IN PLACE (layer 1 of defense):
+ * where-merge for list/count ops, tenant stamping for creates/upserts.
+ * Returns the args object to hand to the executor. Pure argument surgery —
+ * safe to run twice, and shared by both execution paths below.
+ */
+function applyTenantFilter(operation: string, a: AnyArgs, tenantId: string): AnyArgs {
+  if (UNIQUE_READ_OPS.has(operation)) {
+    ensureTenantIdSelected(a)
+    return a
+  }
+  if (WHERE_MERGE_OPS.has(operation)) {
+    a.where = { AND: [{ tenantId }, a.where ?? {}] }
+    return a
+  }
+  if (operation === 'create' || operation === 'createManyAndReturn') {
+    if (a.data && typeof a.data === 'object' && !Array.isArray(a.data)) {
+      if (a.data.tenantId === undefined) a.data.tenantId = tenantId
+    }
+    return a
+  }
+  if (operation === 'createMany') {
+    if (Array.isArray(a.data)) {
+      for (const row of a.data) {
+        if (row && row.tenantId === undefined) row.tenantId = tenantId
+      }
+    } else if (a.data && typeof a.data === 'object' && a.data.tenantId === undefined) {
+      a.data.tenantId = tenantId
+    }
+    return a
+  }
+  if (operation === 'upsert') {
+    if (a.create && a.create.tenantId === undefined) a.create.tenantId = tenantId
+    return a
+  }
+  // update/delete with unique where, raw pass-through: routes only ever
+  // pass ids that came out of a scoped read, AND on PostgreSQL the RLS
+  // layer additionally zeroes cross-tenant writes at the database itself.
+  return a
+}
+
+/**
+ * RLS transaction tracking (layer 2 wiring).
+ *
+ * When db.$transaction(cb) runs on a scoped client, the override below
+ * sets the GUC as the transaction's first statement and establishes this
+ * ALS flag around the user callback — so model operations issued on the
+ * tx delegate know they are already inside a GUC-carrying transaction and
+ * must NOT open a nested one (Prisma forbids nested interactive
+ * transactions). Plain JS async chain: the flag survives from our wrapper
+ * into user route code, no engine boundary is crossed.
+ */
+const rlsTx = new AsyncLocalStorage<{ tenantId: string }>()
+
+/**
+ * Interactive-transaction options for the per-operation RLS wrapper.
+ * Generous timeout: connector sync / ingest commits run multi-statement
+ * work; the Prisma default (5 s) is too tight for them.
+ */
+const RLS_TX_OPTIONS = { timeout: 60_000, maxWait: 5_000 } as const
 
 /**
  * WHY A PROXY INSTEAD OF ONE GLOBAL EXTENSION:
@@ -104,8 +197,17 @@ function maskCrossTenantResult(operation: string, result: unknown, tenantId: str
  *   - context with tenantId: string         → that tenant's scoped client
  *   - context with tenantId: null           → TenantContextError (FAIL
  *     CLOSED: a tenantless authenticated user must never touch data)
+ *
+ * PostgreSQL adds layer 2 on top (see buildTenantScopedClient): every
+ * scoped operation runs inside a transaction whose first statement is
+ * `SELECT set_config('app.current_tenant_id', …, true)` (SET LOCAL
+ * semantics — scoped to the transaction, safe with pooled connections).
+ * The RLS policies in migration 0002 then enforce isolation AT THE
+ * DATABASE even if the where-injection above were bypassed entirely.
  */
 function buildTenantScopedClient(base: PrismaClient, tenantId: string) {
+  const useRls = isPostgresRuntime()
+
   return base.$extends({
     name: 'tenantScoping',
     query: {
@@ -114,56 +216,60 @@ function buildTenantScopedClient(base: PrismaClient, tenantId: string) {
           if (!model || !SCOPED_MODELS.has(model)) {
             return query(args)
           }
-          const a = args as AnyArgs
+          const a = applyTenantFilter(operation, args as AnyArgs, tenantId)
 
-          // 1) List/count/many-writes — merge the tenant filter into where.
-          if (WHERE_MERGE_OPS.has(operation)) {
-            const merged = { AND: [{ tenantId }, a.where ?? {}] }
-            return query({ ...a, where: merged })
-          }
-
-          // 2) Unique-keyed reads — fetch, then mask cross-tenant rows.
-          if (UNIQUE_READ_OPS.has(operation)) {
-            const result = await query(a)
-            return maskCrossTenantResult(operation, result, tenantId)
-          }
-
-          // 3) Creates — stamp the tenant when the caller didn't.
-          if (operation === 'create' || operation === 'createManyAndReturn') {
-            if (a.data && typeof a.data === 'object' && !Array.isArray(a.data)) {
-              if (a.data.tenantId === undefined) a.data.tenantId = tenantId
+          // PostgreSQL: single-keyed reads need masking AFTER fetch even
+          // with RLS (findUnique by a non-tenant-id unique key would
+          // otherwise return the row if… no — with RLS it cannot. But the
+          // masking also produces the correct P2025-vs-null semantics that
+          // withErrorHandler maps to 404; RLS returns null either way.)
+          const finish = (result: unknown) => {
+            if (UNIQUE_READ_OPS.has(operation)) {
+              return maskCrossTenantResult(operation, result, tenantId)
             }
-            return query(a)
-          }
-          if (operation === 'createMany') {
-            if (Array.isArray(a.data)) {
-              for (const row of a.data) {
-                if (row && row.tenantId === undefined) row.tenantId = tenantId
-              }
-            } else if (a.data && typeof a.data === 'object' && a.data.tenantId === undefined) {
-              a.data.tenantId = tenantId
-            }
-            return query(a)
+            return result
           }
 
-          // 4) Upsert — stamp the create side; the where side is
-          //    unique-keyed (Prisma type system) and every route resolves
-          //    the target through a scoped read first (verified across
-          //    ingest / reconcile / findings / clients / connectors).
-          if (operation === 'upsert') {
-            if (a.create && a.create.tenantId === undefined) a.create.tenantId = tenantId
-            return query(a)
+          if (!useRls) {
+            // SQLite dev/test: application-layer scoping only.
+            return finish(await query(a))
           }
 
-          // 5) Single update/delete — Prisma requires unique-shaped where,
-          //    so we cannot merge here. Defense: routes only ever pass ids
-          //    that came out of a scoped read (step 2) in the same request,
-          //    and the AuditLog immutability guard below blocks the
-          //    dangerous variants on the audit table in production.
-          return query(a)
+          // Already inside a GUC-carrying transaction (db.$transaction
+          // override below) — executing directly keeps the transaction
+          // intact; opening another one would nest and fail.
+          if (rlsTx.getStore()) {
+            return finish(await query(a))
+          }
+
+          // Standalone operation: open a transaction, set the tenant GUC
+          // as its first statement, then run the operation on that
+          // transaction's connection. We deliberately execute on the tx
+          // delegate (not `query`) so the statement shares the
+          // transaction — this is what makes the GUC apply to it.
+          //
+          // (Route-level db.$transaction(cb) calls do NOT re-enter this
+          // branch: the proxy-level wrapper below sets the GUC once at the
+          // start of the transaction and flags rlsTx, so operations issued
+          // on the tx delegate take the already-inside-tx path above.)
+          return finish(
+            await base.$transaction(
+              async tx => {
+                await tx.$executeRaw`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`
+                return (tx as unknown as Record<string, Record<string, (x: AnyArgs) => Promise<unknown>>>)
+                  [model]![operation]!(a)
+              },
+              RLS_TX_OPTIONS as unknown as undefined,
+            ),
+          )
         },
       },
     },
+    // NOTE: $transaction is NOT overridden via the client extension —
+    // empirically (Prisma 6.19) a client-component $transaction override
+    // corrupts the return path (the wrapper comes back uncalled). The
+    // GUC injection for route-level transactions happens one level up,
+    // in the db proxy below.
   })
 }
 
@@ -227,8 +333,41 @@ const dbProxy = new Proxy({} as PrismaClient, {
   get(_target, prop, _receiver) {
     if (typeof prop !== 'string') return undefined
     const ctx = getTenantContext()
+
+    // Route-level interactive transactions on a scoped client (PostgreSQL):
+    // inject the tenant GUC as the transaction's FIRST statement and mark
+    // rlsTx so operations issued on the tx delegate skip the per-op wrap.
+    // Array-form transactions pass through untouched — they are used
+    // exclusively on platform tables (User), which carry no RLS policies;
+    // tests/unit/rls-integration.test.ts asserts that constraint.
+    if (prop === '$transaction' && isPostgresRuntime() && ctx && !ctx.unscoped && ctx.tenantId) {
+      const scoped = scopedClientFor(ctx.tenantId)
+      // Capture the narrowed tenant id — TS cannot keep the truthiness
+      // narrowing through the closure below.
+      const tenantId = ctx.tenantId
+      return (arg: unknown, opts: unknown) => {
+        if (typeof arg !== 'function') {
+          return (scoped as unknown as { $transaction: (a: unknown, o: unknown) => unknown }).$transaction(arg, opts)
+        }
+        const callback = arg as (tx: PrismaClient) => unknown
+        return (scoped as unknown as {
+          $transaction: (cb: (tx: PrismaClient) => Promise<unknown>, o?: unknown) => Promise<unknown>
+        }).$transaction(
+          async tx => {
+            await tx.$executeRaw`SELECT set_config('app.current_tenant_id', ${tenantId}, true)`
+            return rlsTx.run({ tenantId }, () => callback(tx))
+          },
+          opts,
+        )
+      }
+    }
+
     if (!ctx || ctx.unscoped) {
       // Process-level code: scripts, bootstrap, CLI. Unscoped by design.
+      // NOTE on PostgreSQL: this path connects as gavel_app WITHOUT a
+      // tenant GUC, so RLS hides every tenant-table row (fail-closed).
+      // System maintenance that must read/write tenant tables uses the
+      // OWNER connection from src/lib/db-system.ts instead.
       return Reflect.get(guarded as object, prop)
     }
     if (ctx.tenantId === null) {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { runUnscoped } from '@/lib/tenant-context'
+import { systemDb } from '@/lib/db-system'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,21 +45,23 @@ export async function GET(req: Request) {
       })
     }
 
-    // Deep probe — aggregate diagnostics only (unscoped on purpose: counts
-    // are global platform health, not tenant data).
-    const deepInfo = await runUnscoped(async () => {
+    // Deep probe — aggregate diagnostics only. Uses the SYSTEM client
+    // (owner path — see src/lib/db-system.ts): on PostgreSQL the RLS-constrained
+    // runtime role correctly sees zero tenant rows without a tenant context;
+    // platform counts are a system-level diagnostic.
+    const deepInfo = await (async () => {
       const [tenants, users, clients, findings] = await Promise.all([
-        db.tenant.count(),
-        db.user.count(),
-        db.client.count(),
-        db.finding.count(),
+        systemDb.tenant.count(),
+        systemDb.user.count(),
+        systemDb.client.count(),
+        systemDb.finding.count(),
       ])
 
       // Migration status (Postgres only — SQLite dev has no _prisma_migrations).
       let migrations: { applied: number; lastAt: Date | null } | null = null
       if (providerFromUrl(process.env.DATABASE_URL ?? '').startsWith('postgres')) {
         try {
-          const rows = await db.$queryRaw<Array<{ finished_at: Date | null }>>`
+          const rows = await systemDb.$queryRaw<Array<{ finished_at: Date | null }>>`
             SELECT finished_at FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY finished_at DESC
           `
           migrations = { applied: rows.length, lastAt: rows[0]?.finished_at ?? null }
@@ -69,7 +71,7 @@ export async function GET(req: Request) {
       }
 
       return { tenants, users, clients, findings, migrations }
-    })
+    })()
 
     const mem = process.memoryUsage()
     return NextResponse.json({

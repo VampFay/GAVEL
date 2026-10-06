@@ -21,13 +21,23 @@
 
 import type { MappedCodeActivity } from '@/lib/ingest/mappers'
 import { ConnectorError, type GithubConfig, type GithubCredentials } from './types'
+import { pinnedFetch } from '@/lib/net/pinned-fetch'
 
 const API = 'https://api.github.com'
 const PER_PAGE = 100
 const MAX_PAGES = 10
 const TIMEOUT_MS = 20_000
 
-type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
+export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
+
+/** WP 1.3: DNS-pinned transport by default (resolve once → validate → dial). */
+const pinnedFetchLike: FetchLike = (url, init = {}) =>
+  pinnedFetch(url, {
+    method: init.method,
+    headers: init.headers as Record<string, string> | undefined,
+    body: init.body as string | Buffer | Uint8Array | undefined,
+    signal: init.signal ?? undefined,
+  })
 
 interface GhCommit {
   sha: string
@@ -135,7 +145,7 @@ function mapPulls(rows: GhPull[]): MappedCodeActivity[] {
 export async function fetchGithubActivities(
   config: GithubConfig,
   creds: GithubCredentials,
-  fetchImpl: FetchLike = fetch
+  fetchImpl: FetchLike = pinnedFetchLike
 ): Promise<{ activities: MappedCodeActivity[]; apiCalls: number; truncated: boolean }> {
   const since = new Date(Date.now() - config.days * 24 * 60 * 60_000).toISOString()
   const base = `${API}/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}`

@@ -18,6 +18,7 @@
 
 import type { MappedTicket } from '@/lib/ingest/mappers'
 import { ConnectorError, type JiraConfig, type JiraCredentials } from './types'
+import { pinnedFetch } from '@/lib/net/pinned-fetch'
 
 const TIMEOUT_MS = 20_000
 const MAX_PAGES = 10
@@ -25,6 +26,19 @@ const MAX_RESULTS_PER_PAGE = 100
 const DESCRIPTION_CAP = 10_000
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
+
+/**
+ * WP 1.3: DNS-pinned transport by default. The Jira host is
+ * USER-CONTROLLED (connector config) — the same SSRF surface the source
+ * fetcher has, so it gets the same resolve-once/validate/dial-IP client.
+ */
+const pinnedFetchLike: FetchLike = (url, init = {}) =>
+  pinnedFetch(url, {
+    method: init.method,
+    headers: init.headers as Record<string, string> | undefined,
+    body: init.body as string | Buffer | Uint8Array | undefined,
+    signal: init.signal ?? undefined,
+  })
 
 interface JiraIssue {
   key?: string
@@ -129,7 +143,7 @@ function mapIssues(rows: JiraIssue[]): MappedTicket[] {
 export async function fetchJiraTickets(
   config: JiraConfig,
   creds: JiraCredentials,
-  fetchImpl: FetchLike = fetch
+  fetchImpl: FetchLike = pinnedFetchLike
 ): Promise<{ tickets: MappedTicket[]; apiCalls: number; truncated: boolean }> {
   const url = `https://${config.host}/rest/api/3/search/jql`
   const init: RequestInit = {

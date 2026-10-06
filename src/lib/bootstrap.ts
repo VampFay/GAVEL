@@ -30,6 +30,7 @@
 // unaffected. The response stays a generic 401 — no existence oracle.
 
 import { db } from './db'
+import { systemDb } from './db-system'
 import { getEnv } from './env'
 import { ensureDemoUsers, seedDemoDataset } from './demo-data'
 
@@ -59,8 +60,10 @@ async function runBootstrap(): Promise<void> {
 
   // Only re-seed the demo dataset on a database with NO clients — a wiped
   // or brand-new DB. Anything non-empty means real (or deliberately kept)
-  // data lives here and must not be touched.
-  const clientCount = await db.client.count()
+  // data lives here and must not be touched. Counted via the SYSTEM client:
+  // on PostgreSQL the RLS-constrained runtime connection correctly sees
+  // zero rows here (no tenant context), which would defeat the check.
+  const clientCount = await systemDb.client.count()
   if (clientCount === 0) {
     const summary = await seedDemoDataset()
     console.warn(

@@ -51,6 +51,30 @@ const envSchema = z.object({
   // Falls back to GAVEL_JWT_SECRET when unset — acceptable for single-tenant
   // pilots; set explicitly before rotating one without the other.
   GAVEL_CONNECTOR_SECRET: z.string().min(32, 'GAVEL_CONNECTOR_SECRET must be >=32 chars').optional(),
+
+  // ── Connector-credential key rotation (WP 1.4 — see scripts/crypto-rotate.ts) ──
+  // Rotation window: the PREVIOUS secret, kept set until crypto:rotate has
+  // re-sealed every stored envelope. Key version ≥2 writes versioned
+  // envelopes (enc:k<N>:); unset/1 keeps the legacy enc:v1: format.
+  GAVEL_CONNECTOR_SECRET_PREVIOUS: z.string().min(32, 'GAVEL_CONNECTOR_SECRET_PREVIOUS must be >=32 chars').optional(),
+  GAVEL_CONNECTOR_KEY_VERSION: z.coerce.number().int().min(1).optional(),
+
+  // ── Async sync pipeline (WP 1.2) ──────────────────────────────────
+  // Redis for the BullMQ connector-sync queue. Unset → the sync route
+  // falls back to inline execution (dev convenience; same code path).
+  REDIS_URL: z.string().min(1).optional(),
+  // 'queue' (default when REDIS_URL is set) | 'inline' (force in-request).
+  GAVEL_SYNC_MODE: z.enum(['queue', 'inline']).optional(),
+
+  // ── Database-level tenancy (WP 1.1 — see migration 0002 + db-system.ts) ──
+  // OWNER connection (gavel_owner role): bypasses RLS. CLI/diagnostics ONLY —
+  // in production it is ignored by the web process unless the explicit
+  // GAVEL_ALLOW_SYSTEM_DB=true opt-in is set (used by /api/health?deep=1).
+  OWNER_DATABASE_URL: z.string().min(1).optional(),
+  GAVEL_ALLOW_SYSTEM_DB: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform(v => v === 'true'),
 })
 
 export type Env = z.infer<typeof envSchema>

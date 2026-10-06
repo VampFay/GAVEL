@@ -43,9 +43,13 @@ All env vars are validated at startup by a Zod schema (`src/lib/env.ts`) — any
 
 | Var | Required | Notes |
 |-----|----------|-------|
-| `DATABASE_URL` | yes | SQLite in dev (`file:../db/custom.db`); `postgresql://…` in production — the Prisma client is generated per protocol at install time (`scripts/generate.ts`) |
+| `DATABASE_URL` | yes | SQLite in dev (`file:../db/custom.db`); `postgresql://…` (gavel_app role) in production — the Prisma client is generated per protocol at install time (`scripts/generate.ts`) |
+| `OWNER_DATABASE_URL` | prod (migrations) | gavel_owner role — bypasses RLS; migrations + system CLI only, never the web process |
 | `GAVEL_JWT_SECRET` | prod | HS256 session secret, ≥ 32 chars. Dev uses a loud-warned fallback |
 | `GAVEL_CONNECTOR_SECRET` | prod (rec.) | AES-256-GCM key sealing saved connector credentials; falls back to the JWT secret for single-tenant pilots |
+| `GAVEL_CONNECTOR_SECRET_PREVIOUS` / `GAVEL_CONNECTOR_KEY_VERSION` | rotation | Zero-downtime credential-key rotation — see `bun run crypto:rotate` |
+| `REDIS_URL` | prod (rec.) | BullMQ connector-sync queue; unset → inline sync fallback |
+| `GAVEL_SYNC_MODE` | no | `queue` \| `inline` — force a mode regardless of Redis |
 | `GAVEL_REQUIRE_AUTH` | no | `true` forces strict production auth regardless of NODE_ENV — use on deploy targets that don't set NODE_ENV reliably |
 | `GAVEL_RATE_LIMIT_STORE` | no | `memory` (single process) or `db` (shared, survives restarts — the production default) |
 | `GAVEL_AUTO_SEED_DEMO` | no | dev/test only: self-heal that restores missing demo users + demo dataset on an empty DB (default on). `false` disables; never active in production |
@@ -96,13 +100,14 @@ Three paths, all landing in the same evidence tables (`Ticket` / `CodeActivity` 
 
 ## Security posture
 
-- **Tenant isolation**: every data model carries a required `tenantId`; the DB layer (`src/lib/tenant-context.ts` + `src/lib/db.ts`) memoizes per-tenant scoped Prisma clients and applies them to every query, failing closed when no tenant context exists. Cross-tenant ids resolve to 404s, never leaks
+- **Tenant isolation (two layers)**: (1) application — every data model carries a required `tenantId`; the Prisma client layer scopes queries per-request via AsyncLocalStorage and fails closed; (2) database — PostgreSQL Row-Level Security on every tenant table (`TO gavel_app` policies on the transaction-local `app.current_tenant_id`), so even a query that bypasses the app layer sees zero cross-tenant rows. The runtime DB role owns nothing; migrations and system CLI run as the owner role via `OWNER_DATABASE_URL`
 - **Provisioning & revocation**: invite (72 h) / password-reset (24 h) purpose tokens; disabling a user or bumping their token epoch invalidates live sessions on the next request; last-admin + self-lockout guards
 - httpOnly + `SameSite=Strict` + Secure-in-prod JWT cookie; middleware stamps verified identity into request headers (client-supplied actor headers are ignored)
 - Login/ingest/sync brute-force protection: fixed-window rate limit per IP and per identity, 429 + `Retry-After`; store is db-backed (shared across instances) in production
 - CSRF surface closed by architecture (SameSite=Strict + JSON-only bodies + no CORS) — rationale documented in `src/lib/auth-cookie.ts`
-- Connector credentials sealed with AES-256-GCM (scrypt-derived key) before storage; write-only — the API never returns them
-- Server-side source fetching behind an explicit SSRF guard (see *Data ingestion*, path 3)
+- Connector credentials sealed with AES-256-GCM (scrypt-derived key) before storage; write-only — the API never returns them; versioned envelopes (`enc:k<N>:`) with a zero-downtime `crypto:rotate` CLI
+- Server-side fetching behind a DNS-pinned SSRF guard (resolve once → validate every record → dial the validated IP with original Host/SNI — no TOCTOU rebinding window) across source fetch AND connector APIs
+- Async connector syncs (BullMQ + Redis) with 5-attempt exponential backoff; durable, RLS-protected SyncJob rows are the progress source of truth (SSE + polling)
 - Immutable audit log on every mutation, with actor + request id
 - Caddy edge config: security headers, 1 MB body limit, no CORS
 

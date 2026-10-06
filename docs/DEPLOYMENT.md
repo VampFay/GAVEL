@@ -17,20 +17,30 @@ the current code resolves each:
 ## 1. Prerequisites
 
 - **Node 20+ or Bun 1.2+**
-- **PostgreSQL 14+** — managed strongly recommended (Neon, Supabase, RDS).
+- **PostgreSQL 16** (14+ works; 16 is what dev parity and CI test
+  against) — managed strongly recommended (Neon, Supabase, RDS).
   Take note of the connection string and whether TLS is required
   (`sslmode=require` — the default on managed providers).
+- **Redis 7** — for the async connector-sync queue (WP 1.2). Without it
+  the sync route falls back to inline execution; with it, run the worker
+  process (`bun run worker`) alongside the web process.
 - **A TLS-terminating proxy** — Caddy (a `Caddyfile` is in the repo) or
   your platform's edge. GAVEL cookies are `Secure`-flagged behind HTTPS.
+
+Local development uses the same stack via `docker compose up -d`
+(postgres:16-alpine + redis:7-alpine, roles provisioned on first boot),
+or `bun run db:embedded` for a no-Docker embedded PostgreSQL 16.
 
 ## 2. Environment
 
 Copy `.env.production.example` and fill in at minimum:
 
 ```
-DATABASE_URL=postgresql://…?sslmode=require
+DATABASE_URL=postgresql://gavel_app:…@host:5432/gavel?sslmode=require
+OWNER_DATABASE_URL=postgresql://gavel_owner:…@host:5432/gavel?sslmode=require
 GAVEL_JWT_SECRET=<openssl rand -hex 32>
 GAVEL_CONNECTOR_SECRET=<openssl rand -hex 32>   # different from the JWT secret
+REDIS_URL=redis://…
 NEXT_PUBLIC_APP_URL=https://gavel.yourdomain.com
 NODE_ENV=production
 ```
@@ -39,14 +49,39 @@ The app validates this at startup (`src/lib/env.ts`) and fails loudly on a
 missing/short JWT secret. The rate limiter defaults to the **db store** in
 production (shared across instances, survives restarts).
 
+### Roles (database-level tenant isolation — WP 1.1)
+
+Migration `0002_rls_tenant_isolation` enables Row-Level Security on every
+tenant-data table with `TO gavel_app` policies keyed on the transaction-local
+`app.current_tenant_id` (set by `src/lib/db.ts` on every scoped operation).
+The runtime role (`gavel_app`, `DATABASE_URL`) owns nothing and is fully
+RLS-constrained: a query that forgets its tenant context sees ZERO rows.
+The owner role (`gavel_owner`, `OWNER_DATABASE_URL`) runs migrations and
+system CLI tools (create-tenant, seed, crypto:rotate) — never the web
+process (enforced: OWNER_DATABASE_URL is ignored in production unless
+GAVEL_ALLOW_SYSTEM_DB=true, used only by `health?deep=1`).
+
+Provision on managed PostgreSQL (mirrors `scripts/pg/init-roles.sql`):
+
+```sql
+CREATE ROLE gavel_owner LOGIN PASSWORD '…';
+CREATE ROLE gavel_app   LOGIN PASSWORD '…';
+GRANT CONNECT ON DATABASE gavel TO gavel_owner, gavel_app;
+GRANT USAGE, CREATE ON SCHEMA public TO gavel_owner;
+GRANT USAGE ON SCHEMA public TO gavel_app;
+GRANT CREATE ON DATABASE gavel TO gavel_owner;  -- 0001 issues CREATE SCHEMA IF NOT EXISTS
+```
+
 ## 3. First deploy
 
 ```bash
 bun install                      # postinstall generates the PG-bound client
                                  # (DATABASE_URL protocol decides — scripts/generate.ts)
-bun run migrate:deploy           # applies prisma/migrations/* in order
-bun run build                    # standalone output in .next/standalone
-bun run start                    # or your platform's start command
+bun run migrate:deploy:owner    # applies prisma/migrations/* as gavel_owner
+                                 # (needs OWNER_DATABASE_URL)
+bun run build                   # standalone output in .next/standalone
+bun run start                   # web process (gavel_app connection)
+bun run worker                  # connector-sync worker (same env + REDIS_URL)
 ```
 
 Then bootstrap the first tenant (tenants are CLI-only by design — bringing
@@ -155,3 +190,54 @@ DATABASE_URL="postgresql://u:p@l/x" bunx prisma migrate diff \
 | Create tenant + admin | `bun scripts/create-tenant.ts …` |
 | Backup / restore | `bash scripts/backup.sh` / `restore.sh` |
 | Deep health | `curl -s https://your-host/api/health?deep=1` |
+
+---
+
+## Connector-credential key rotation (WP 1.4)
+
+Stored connector credentials are sealed with AES-256-GCM under a key derived
+from `GAVEL_CONNECTOR_SECRET`. Rotation is zero-downtime:
+
+```bash
+# 1. New secret + demoted old secret + version bump, then deploy.
+#    Mixed-version fleets keep reading every envelope (self-describing
+#    versions: legacy enc:v1: and versioned enc:k<N>:).
+export GAVEL_CONNECTOR_SECRET=$(openssl rand -hex 32)     # NEW
+export GAVEL_CONNECTOR_SECRET_PREVIOUS=<the-old-secret>
+export GAVEL_CONNECTOR_KEY_VERSION=2
+
+# 2. Re-seal every stored credential (idempotent, --verify round-trips).
+bun run crypto:rotate            # add --dry-run to preview
+
+# 3. Unset GAVEL_CONNECTOR_SECRET_PREVIOUS. Rotation complete.
+```
+
+The CLI walks every tenant's connectors through the owner connection,
+reports per-generation counts, and lists any rows it could not open (those
+need their credentials re-entered — e.g. sealed under a long-lost secret).
+
+## Async connector sync (WP 1.2)
+
+With `REDIS_URL` set, `POST /api/connectors/:id/sync` enqueues a BullMQ job
+and returns `202 { jobId }` — the worker (`bun run worker`) executes the
+pull + commit with 5 attempts and exponential backoff (2s→16s). Progress:
+
+- **SSE**: `GET /api/connectors/:id/progress?jobId=…` — `state` events with
+  status/attempts/stats, `done` on termination, 15 s heartbeats, 10 min cap.
+- **Polling**: `GET /api/connectors/:id/jobs?limit=10` — recent jobs.
+
+The durable `SyncJob` row (tenant-scoped + RLS-protected like all tenant
+data) is the single source of truth for both. Without `REDIS_URL` the sync
+route executes inline — the identical code path (`src/lib/jobs/sync-core.ts`)
+without the queue.
+
+## SSRF posture (WP 1.3)
+
+All server-side URL fetching — published-document pulls
+(`/api/sources/fetch`), GitHub API calls, and Jira (user-controlled hosts) —
+goes through the DNS-pinned client (`src/lib/net/pinned-fetch.ts`): resolve
+once, validate EVERY record against the private/reserved CIDR set, dial the
+validated IP directly with the original Host header and TLS SNI. There is no
+second resolution anywhere on the request path, which closes the classic
+TOCTOU DNS-rebinding window. Redirects are followed manually, one pinned
+hop at a time.

@@ -11,8 +11,13 @@
 // deletes anything — it only fills an empty database or creates missing
 // demo users.
 
-import { db } from '../src/lib/db'
+import { systemDb as db } from '../src/lib/db-system'
 import { seedDemoDataset } from '../src/lib/demo-data'
+
+// NOTE: the wipe uses the SYSTEM client (owner path on PostgreSQL) — the
+// RLS-constrained runtime connection would correctly refuse to delete
+// across tenants. seedDemoDataset() itself runs under runWithTenant(), so
+// its writes flow through the properly GUC-scoped application path.
 
 async function main() {
   console.log('Seeding GAVEL demo data...')

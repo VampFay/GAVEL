@@ -82,6 +82,7 @@ model Tenant {
   alerts            Alert[]
   auditLogs         AuditLog[]
   connectorSources  ConnectorSource[]
+  syncJobs          SyncJob[]
 }
 
 model User {
@@ -578,10 +579,37 @@ model ConnectorSource {
   tenant   Tenant   @relation(fields: [tenantId], references: [id])
   project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   creator  User?    @relation("ConnectorCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  jobs     SyncJob[]
 
   @@index([tenantId])
   @@index([projectId])
   @@unique([projectId, kind])
+}
+
+// WP 1.2 — asynchronous connector sync pipeline (BullMQ + Redis).
+// One row per enqueued sync: the queue job's database-side mirror and the
+// single source of truth for progress reporting (SSE + polling read this;
+// the queue itself is ephemeral).
+model SyncJob {
+  id           String           @id @default(cuid())
+  tenantId     String
+  connector    ConnectorSource  @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  connectorId  String
+  status       String           // queued | active | completed | failed
+  attempts     Int              @default(0)
+  error        String?
+  stats        String?          // JSON: { fetched, committed, apiCalls, truncated }
+  requestedBy  String           // actor email at enqueue time
+  requestId    String?          // correlation id of the enqueue request
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, connectorId, createdAt])
+  @@index([status])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

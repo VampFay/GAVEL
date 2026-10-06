@@ -27,6 +27,7 @@
 
 import dns from 'node:dns/promises'
 import { ConnectorError } from '@/lib/connectors/types'
+import { pinnedFetch } from '@/lib/net/pinned-fetch'
 
 const MAX_BYTES = 2 * 1024 * 1024
 const TIMEOUT_MS = 20_000
@@ -41,6 +42,21 @@ export class SourceFetchError extends ConnectorError {
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
+
+/**
+ * WP 1.3: the DEFAULT transport is the DNS-pinned client — resolve once,
+ * validate every address, dial the validated IP with the original Host
+ * header and SNI. This closes the TOCTOU rebinding window that a plain
+ * fetch() leaves open (validation lookup ≠ connection lookup).
+ * fetchImpl stays injectable so unit tests never touch the network.
+ */
+const pinnedFetchLike: FetchLike = (url, init = {}) =>
+  pinnedFetch(url, {
+    method: init.method,
+    headers: init.headers as Record<string, string> | undefined,
+    body: init.body as string | Buffer | Uint8Array | undefined,
+    signal: init.signal ?? undefined,
+  })
 
 // ───────────────────────── IP / host validation ─────────────────────────
 
@@ -80,10 +96,18 @@ export function isPrivateAddress(host: string): boolean {
   if (v6.startsWith('fc') || v6.startsWith('fd')) return true // fc00::/7 ULA
   if (v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')) return true // link-local
   if (v6.startsWith('ff')) return true // multicast
-  // IPv4-mapped (::ffff:10.0.0.1) — validate the embedded v4
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v6)
-  const embedded = mapped?.[1]
-  if (embedded) return isPrivateAddress(embedded)
+  // IPv4-mapped — validate the embedded v4. TWO textual forms, because
+  // WHATWG URL normalizes "::ffff:10.0.0.1" into the hex-group form
+  // "::ffff:a00:1" (caught live by the WP 1.3 test suite).
+  const mappedDotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(v6)
+  if (mappedDotted?.[1]) return isPrivateAddress(mappedDotted[1])
+  const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(v6)
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1]!, 16)
+    const lo = parseInt(mappedHex[2]!, 16)
+    const dotted = `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`
+    return isPrivateAddress(dotted)
+  }
   return false
 }
 
@@ -218,7 +242,7 @@ function isTextualContentType(ct: string | null): boolean {
  */
 export async function fetchTextFromUrl(
   rawUrl: string,
-  fetchImpl: FetchLike = fetch
+  fetchImpl: FetchLike = pinnedFetchLike
 ): Promise<FetchedText> {
   let current = rawUrl
   let res: Response | null = null
@@ -300,7 +324,7 @@ export interface GithubFileRequest {
  */
 export async function fetchTextFromGithub(
   req: GithubFileRequest,
-  fetchImpl: FetchLike = fetch
+  fetchImpl: FetchLike = pinnedFetchLike
 ): Promise<FetchedText> {
   if (req.path.startsWith('/') || req.path.split('/').includes('..')) {
     throw new SourceFetchError('path must be repo-relative and cannot contain ".." segments', 400)

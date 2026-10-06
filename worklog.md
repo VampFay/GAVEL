@@ -164,3 +164,42 @@ Stage Summary:
 - SYNCED: github.com/VampFay/GAVEL main = local main = f718d07 (36 commits, full 2-week evolution + all 5 production blockers + today's hardening/sweep).
 - Remote's unique motion-v2 work preserved at archive/motion-system-v2 (recoverable for cherry-pick; note: it is based on a tree before the professional-readiness sweep — its verdict-flash/app-store parts need adaptation, not blind merge).
 - Recommended follow-up: user should revoke the PAT after this session (exposed in plaintext chat) — or at minimum it expires unused.
+
+---
+Task ID: wp1-1-to-1-4-20261006
+Agent: Super Z (main agent)
+Task: User's 4 work packages: WP1.1 DB parity + multi-tenant RLS, WP1.2 async connector sync (BullMQ+Redis+SSE), WP1.3 SSRF DNS pinning, WP1.4 envelope encryption + key rotation. Full implementation + extensive edge-case testing + per-WP timing report.
+
+Work Log:
+- T0 env probe: no docker/sudo in sandbox; apt blocked; solved infra via npm: @embedded-postgres/linux-x64@16.14 (matches postgres:16-alpine lineage; ICU60 runtime fetched+pinned via scripts/pg-fetch-icu.sh), redis-memory-server (real redis), pg + bullmq + ioredis.
+- SANDBOX RESET RECOVERY (mid-WP1.1): platform had reset local git to a df7c200-equivalent checkpoint, losing 9acc21a/de65cba/776ea84 locally (they existed on GitHub). Recovered: stash WP work → fetch+reset to origin/main (776ea84) → clean stash pop (zero conflicts) → debris re-quarantined by reset → .zscripts/dev.sh (platform boot chain, wiped) reconstructed + revive-dev verified. Lesson recorded: platform checkpoints can REWIND local history; push early, push often.
+- WP 1.1 (08:05:55→08:45:28 core, ~40 min incl. recovery detour; pure engineering ≈ 30 min):
+  * docker-compose.yml: postgres:16-alpine + redis:7-alpine; roles provisioned on first volume boot via scripts/pg/init-roles.sql (gavel_owner: DDL+migrations, bypasses RLS; gavel_app: DML-only runtime role, fully RLS-constrained).
+  * Migration 0002_rls_tenant_isolation: ENABLE RLS on all 20 tenant tables + TO gavel_app policies on current_setting('app.current_tenant_id', true) (NULL GUC → zero rows, fail-closed by construction) + WITH CHECK rejecting cross-tenant writes + grants + default privileges.
+  * src/lib/db.ts: PG-path rework — every scoped op runs in a transaction whose first statement is SELECT set_config(...,true) (SET LOCAL semantics, pool-safe); route-level db.$transaction(cb) gets GUC injected via a PROXY-level wrapper (client-extension $transaction override empirically corrupts return path in Prisma 6.19 — documented); rlsTx ALS flag prevents nested wrapping; array-form transactions documented as platform-table-only.
+  * src/lib/db-system.ts: OWNER_DATABASE_URL system client (prod fail-safe: ignored without GAVEL_ALLOW_SYSTEM_DB=true); health?deep=1 + bootstrap empty-DB check + seed + create-tenant moved to system/owner paths.
+  * LATENT BUG FOUND+FIXED in the mask layer: findUnique with select lacking tenantId got nulled as "cross-tenant" (row.tenantId undefined ≠ tenant) — surfaced by the new jobs route; fix force-adds tenantId to unique-read projections.
+  * Verification: scripts/verify-db-parity.ts — 30/30 checks (fresh migrate, shadow-DB transactional drift diff via prisma migrate diff, RLS metadata on 21 tables, isolation matrix incl. 42501 cross-tenant write, app-layer GUC path); verify-production-fixes.sh against live PG server: 18/18 (tenant bootstrap, invite, isolation, revocation, deep health); CI db-parity job added.
+  * Debug fixes en route: GRANT CREATE ON DATABASE (0001's CREATE SCHEMA), _prisma_migrations grant guarded for shadow replay, replace('/gavel') substring bug (matched //gavel_owner → phantom role gavel_shadow_owner), bun auto-.env leaking sqlite DATABASE_URL into prisma child processes.
+- WP 1.2 (≈08:46→09:01:30, ~15 min):
+  * SyncJob model (tenant-scoped, RLS via migration 0003 w/ policy) — durable mirror of ephemeral queue jobs, progress source of truth.
+  * src/lib/jobs/: sync-core.ts (extracted inline sync, injectable fetch), queue.ts (BullMQ Queue/Worker factories, mode resolution queue|inline|auto, 5-attempt exponential backoff 2s→16s, SSE formatting, status state machine), worker-processor.ts (runWithTenant GUC context, permanent-vs-transient failure classification).
+  * Routes: POST sync → 202 {jobId} in queue mode (inline fallback preserved, same code path); GET progress (SSE: state/done events, 750ms poll, 15s heartbeats, 10min cap, abort on disconnect); GET jobs (polling). UI: connector-panel watchJob() EventSource + poll fallback + live progress indicator.
+  * Verification: tests/unit/jobs.test.ts 18 unit tests; scripts/verify-jobs-pipeline.ts 9/9 against REAL Redis+BullMQ (completion, retry fail-fail-succeed, exhaustion→failed); LIVE E2E: server+worker in queue mode, real GitHub connector w/ PAT → 202 → worker pulled 29 real activities → SSE streamed active→completed→done → re-sync idempotent (29 duplicates, 0 new).
+- WP 1.3 (≈09:01:35→09:05:18, ~4 min):
+  * src/lib/net/pinned-fetch.ts: node:https-based (Bun-compatible; undici dispatcher unsupported in Bun fetch) — resolve ONCE via dns.lookup(all), validate EVERY record against private/reserved CIDRs (mixed answer = rebinding-shaped, refused), dial the validated IP with servername=hostname (SNI + cert validation bind to the real domain) and Host=original. No second resolution anywhere.
+  * Integrated as default transport in fetch-remote.ts (both fetchers), github.ts, jira.ts (user-controlled host = the critical surface). Redirects stay manual — each hop re-pinned.
+  * ANOTHER REAL BUG CAUGHT BY TESTS: WHATWG URL normalizes ::ffff:10.0.0.1 → ::ffff:a00:1 (hex form), which escaped the dotted-quad v4-mapped check; added hex-group parsing.
+  * Verification: 11 pinned-fetch tests (single-lookup TOCTOU proof, literal/mixed/private refusal, abort, LIVE example.com HTTPS through the pinned path) + live server fetch (175B cleaned text, SSRF vectors incl. hex-mapped still 400).
+- WP 1.4 (≈09:05:30→09:12:07, ~6.5 min):
+  * crypto.ts rewrite: envelope generations — legacy enc:v1: (unchanged default, zero stored-byte drift on upgrade) + versioned enc:k<N>: (per-version scrypt salts); GAVEL_CONNECTOR_SECRET_PREVIOUS rotation window; open() tries candidate keys in order (GCM rejects cleanly); generation introspection.
+  * scripts/crypto-rotate.ts (bun run crypto:rotate): cross-tenant owner-path walk, --dry-run, --verify (round-trip per row), idempotent, no-op guard without version bump, per-generation reporting.
+  * Verification: 12 crypto-rotation tests incl. real-subprocess CLI drill (fixtures → dry-run no-write → rotate+verify → post-rotation open with new key alone → idempotence); LIVE drill against dev DB: legacy seal → rotate → k2 envelope → clean open.
+- Final gates: typecheck 0, lint 0, 322/322 tests (20 files), schema:check in sync, parity 30/30, jobs 9/9, dev server healthy, browser E2E (intake → SOW → Link service/URL modes → extract → Evidence step w/ LIVE CONNECTORS panel, zero page errors).
+- Docs: DEPLOYMENT.md (roles, migrate:deploy:owner, worker, rotation runbook, SSE, SSRF posture), README (env table + security posture), .env.example, .env.production.example (RECREATED — previous session's file was silently gitignored by .env* pattern and never committed; .gitignore now unignores it).
+- Cleanup: superseded rls-smoke/rls-app-layer diagnostic scripts removed (folded into verify-db-parity.ts); parity harness now restores the SQLite client after PG legs.
+
+Stage Summary:
+- All 4 WPs delivered, tested, live-verified. Timing (wall-clock UTC): WP1.1 ≈40min (incl. sandbox-recovery; pure ≈30), WP1.2 ≈15min, WP1.3 ≈4min, WP1.4 ≈6.5min, final verification+docs ≈13min; cumulative from T0 (08:01) ≈84min.
+- 3 latent bugs found+fixed by the new test surfaces (unique-read projection mask, hex-form v4-mapped IPv6, Prisma client-extension $transaction override).
+- New operator surfaces: db:verify:parity, db:embedded, migrate:deploy:owner, crypto:rotate, worker.

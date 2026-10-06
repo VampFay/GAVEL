@@ -75,6 +75,8 @@ export function ConnectorPanel({ clientId }: { clientId: string }) {
 
   const [busy, setBusy] = useState<'save' | 'sync' | `sync:${string}` | null>(null)
   const [lastResult, setLastResult] = useState<SyncResult | null>(null)
+  // WP 1.2 — live progress for the currently-streamed sync job.
+  const [progress, setProgress] = useState<{ jobId: string; status: string; error?: string | null } | null>(null)
 
   async function refresh() {
     setLoading(true)
@@ -121,13 +123,83 @@ export function ConnectorPanel({ clientId }: { clientId: string }) {
     void refresh()
   }
 
+  /**
+   * WP 1.2 — subscribe to a queued sync job via SSE. Falls back to a short
+   * poll when EventSource is unavailable. Refreshes the connector list and
+   * shows the committed counts when the job completes.
+   */
+  function watchJob(connectorId: string, jobId: string) {
+    setProgress({ jobId, status: 'queued' })
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null
+    const finish = (final: { status: string; error?: string | null; stats?: { committed?: { ticketsCreated?: number; ticketsUpdated?: number; activitiesCreated?: number; duplicates?: number } } | null }) => {
+      if (fallbackTimer) clearInterval(fallbackTimer)
+      setProgress(null)
+      if (final.status === 'completed') {
+        const c = final.stats?.committed
+        const imported = c
+          ? c.activitiesCreated !== undefined
+            ? `${c.activitiesCreated} new activities (${c.duplicates} already known)`
+            : `${c.ticketsCreated} new + ${c.ticketsUpdated} updated tickets`
+          : 'nothing new upstream'
+        toast.success('Sync complete', { description: imported })
+      } else {
+        toast.error('Sync failed', { description: final.error ?? 'unknown error' })
+      }
+      void refresh()
+    }
+
+    if (typeof EventSource !== 'undefined') {
+      const es = new EventSource(`/api/connectors/${connectorId}/progress?jobId=${encodeURIComponent(jobId)}`)
+      es.addEventListener('state', e => {
+        try {
+          const s = JSON.parse((e as MessageEvent).data) as { status: string; error?: string | null }
+          setProgress({ jobId, status: s.status, error: s.error })
+        } catch { /* ignore malformed frames */ }
+      })
+      es.addEventListener('done', e => {
+        es.close()
+        try {
+          finish(JSON.parse((e as MessageEvent).data))
+        } catch { finish({ status: 'completed' }) }
+      })
+      es.onerror = () => {
+        // The route closes the stream on terminal states — onerror may fire
+        // then. If we still have no terminal state, switch to polling.
+        es.close()
+        if (!fallbackTimer) {
+          fallbackTimer = setInterval(async () => {
+            const { data } = await apiGet<{ jobs: Array<{ jobId: string; status: string; error: string | null; terminal: boolean; stats: { committed?: { ticketsCreated?: number; ticketsUpdated?: number; activitiesCreated?: number; duplicates?: number } } | null }> }>(`/api/connectors/${connectorId}/jobs?limit=5`)
+            const j = data?.jobs.find(x => x.jobId === jobId)
+            if (!j) return
+            setProgress({ jobId, status: j.status, error: j.error })
+            if (j.terminal) finish({ status: j.status, error: j.error, stats: j.stats })
+          }, 1000)
+        }
+      }
+    } else {
+      fallbackTimer = setInterval(async () => {
+        const { data } = await apiGet<{ jobs: Array<{ jobId: string; status: string; error: string | null; terminal: boolean; stats: { committed?: { ticketsCreated?: number; ticketsUpdated?: number; activitiesCreated?: number; duplicates?: number } } | null }> }>(`/api/connectors/${connectorId}/jobs?limit=5`)
+        const j = data?.jobs.find(x => x.jobId === jobId)
+        if (!j) return
+        setProgress({ jobId, status: j.status, error: j.error })
+        if (j.terminal) finish({ status: j.status, error: j.error, stats: j.stats })
+      }, 1000)
+    }
+  }
+
   async function sync(id: string) {
     setBusy(`sync:${id}`)
     setLastResult(null)
-    const { data, error } = await apiPost<SyncResult>(`/api/connectors/${id}/sync`, {})
+    setProgress(null)
+    const { data, error } = await apiPost<SyncResult & { queued?: boolean; jobId?: string; mode?: string }>(`/api/connectors/${id}/sync`, {})
     setBusy(null)
     if (error || !data) {
       toast.error('Sync failed', { description: error?.message ?? 'unknown error' })
+      return
+    }
+    if (data.queued && data.jobId) {
+      // 202 — the worker executes it; watch via SSE.
+      watchJob(id, data.jobId)
       return
     }
     setLastResult(data)
@@ -212,6 +284,16 @@ export function ConnectorPanel({ clientId }: { clientId: string }) {
               </Button>
             </div>
           ))}
+        </div>
+      )}
+
+      {progress && (
+        <div className="mt-2 flex items-center gap-2 rounded border border-sky-200 bg-sky-50 p-2.5 text-xs text-sky-700 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>
+            Sync {progress.status === 'queued' ? 'queued — waiting for a worker' : `running (${progress.status})`}
+            {progress.error ? ` — ${progress.error}` : ''}
+          </span>
         </div>
       )}
 

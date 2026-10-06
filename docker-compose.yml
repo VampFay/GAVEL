@@ -1,0 +1,57 @@
+# GAVEL — development database parity (WP 1.1).
+#
+# Dev/prod parity via Dockerized PostgreSQL 16 (matches the production
+# schema provider AND the embedded-PG fallback version used in CI).
+#
+#   docker compose up -d            # boot PG on :5432 (first boot provisions roles)
+#   cp .env.example .env            # then set the URLs below
+#   bun run db:push:pg              # create the schema
+#   bun run seed:dev                # demo dataset
+#
+# Roles (provisioned on FIRST volume boot via scripts/pg/init-roles.sql):
+#   gavel_owner / change-me-owner  — migrations + system CLI only (bypasses RLS)
+#   gavel_app   / change-me-app    — the server's runtime role (subject to RLS)
+#
+# CHANGE BOTH PASSWORDS before anything real lives in this database.
+# On managed providers (Neon/Supabase/RDS) create the same roles by hand —
+# see docs/DEPLOYMENT.md §Roles.
+
+services:
+  gavel-db:
+    image: postgres:16-alpine
+    container_name: gavel-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: change-me-superuser
+      POSTGRES_DB: gavel
+    ports:
+      - '5432:5432'
+    volumes:
+      - gavel-db-data:/var/lib/postgresql/data
+      - ./scripts/pg/init-roles.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d gavel']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # WP 1.2 — the BullMQ connector-sync queue backend. Required only when
+  # running the app in queue mode (REDIS_URL set); with it unset the sync
+  # route falls back to inline execution. Run the worker alongside:
+  #   bun run worker
+  gavel-redis:
+    image: redis:7-alpine
+    container_name: gavel-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - gavel-redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  gavel-db-data:
+  gavel-redis-data:

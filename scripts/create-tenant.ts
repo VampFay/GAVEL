@@ -25,7 +25,11 @@ import { PrismaClient } from '@prisma/client'
 import { randomBytes } from 'node:crypto'
 import { signPurposeToken } from '../src/lib/auth'
 
-const db = new PrismaClient()
+// WP 1.1: provisioning is a SYSTEM operation — connect as the table owner
+// (gavel_owner) when provisioned, so it is never impeded by the RLS layer.
+const ownerUrl = process.env.OWNER_DATABASE_URL
+if (ownerUrl) console.log('create-tenant: using OWNER_DATABASE_URL (bypasses RLS)')
+const db = new PrismaClient(ownerUrl ? { datasources: { db: { url: ownerUrl } } } : undefined)
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag)
